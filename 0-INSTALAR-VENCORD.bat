@@ -1,4 +1,5 @@
 @echo off
+setlocal enabledelayedexpansion
 chcp 65001 >nul
 set CI=true
 title LefferzinBypass - Instalador Vencord
@@ -38,6 +39,49 @@ if %errorlevel% neq 0 (
     )
 )
 
+if not exist "manifest.json" (
+    echo [0/7] Arquivos do plugin nao encontrados na pasta local.
+    echo        Baixando direto do GitHub (Mockerz/YaniNeko)...
+    echo.
+    where curl >nul 2>&1
+    if %errorlevel% neq 0 (
+        echo [ERRO] curl nao encontrado. Baixe os arquivos manualmente do GitHub: https://github.com/Mockerz/YaniNeko
+        pause
+        exit /b 1
+    )
+    curl -L -o "_plugin_github.zip" "https://github.com/Mockerz/YaniNeko/archive/refs/heads/main.zip"
+    if %errorlevel% neq 0 (
+        echo [ERRO] Falha ao baixar ZIP do GitHub. Verifique sua internet.
+        pause
+        exit /b 1
+    )
+    where tar >nul 2>&1
+    if %errorlevel% neq 0 (
+        echo [ERRO] tar (extracao) nao encontrado. Extraia manualmente o _plugin_github.zip.
+        pause
+        exit /b 1
+    )
+    tar -xf "_plugin_github.zip"
+    if %errorlevel% neq 0 (
+        echo [ERRO] Falha ao extrair o ZIP. Extraia manualmente.
+        pause
+        exit /b 1
+    )
+    if exist "YaniNeko-main" (
+        echo        Extraido! Movendo arquivos do plugin para a pasta atual...
+        xcopy /e /y /i "YaniNeko-main\*" "." >nul 2>&1
+        rmdir /s /q "YaniNeko-main" >nul 2>&1
+    )
+    del /f /q "_plugin_github.zip" >nul 2>&1
+    if not exist "manifest.json" (
+        echo [ERRO] Ainda nao foi possivel encontrar os arquivos do plugin. Baixe manualmente do GitHub.
+        pause
+        exit /b 1
+    )
+    echo OK
+    echo.
+)
+
 echo [1/7] Baixando/Atualizando Vencord...
 if not exist "Vencord" (
     echo Clonando Vencord...
@@ -65,7 +109,8 @@ if not exist "%PLUGIN_DIR%\bin\win32-x64" mkdir "%PLUGIN_DIR%\bin\win32-x64" >nu
 set "COPY_OK=1"
 
 echo   - Copiando arquivos essenciais do plugin...
-for %%f in (manifest.json index.tsx native.ts presence.ts stability.ts vpn-controller.ts vpn-proton.ts vpn-types.ts vpn-windows.ts) do (
+set "ESSENTIAL_FILES=manifest.json index.tsx native.ts presence.ts stability.ts vpn-controller.ts vpn-proton.ts vpn-types.ts vpn-windows.ts"
+for %%f in (%ESSENTIAL_FILES%) do (
     if not exist "%%f" (
         echo   [ERRO] Arquivo essencial FALTANDO na pasta do plugin: %%f
         echo   Verifique se voce rodou o instalador na pasta correta (raiz do LefferzinBypass).
