@@ -25,17 +25,22 @@ function Stop-DiscordProcesses {
     Start-Sleep -Seconds 3
 }
 
-function Run-InDir($dir, $program, $arglist) {
+function Run-InDir($dir, $program, $arglist, [switch]$CaptureOnly) {
     Push-Location $dir
     try {
         $cmd = Get-Command $program -ErrorAction SilentlyContinue
         if (-not $cmd) {
             Write-Warn "Comando nao encontrado: $program"
-            return 127
+            return [pscustomobject]@{ ExitCode = 127; Output = "" }
         }
         $all = @($arglist)
-        & $cmd.Source @all
-        return $LASTEXITCODE
+        if ($CaptureOnly) {
+            $out = & $cmd.Source @all 2>&1 | Out-String
+            return [pscustomobject]@{ ExitCode = $LASTEXITCODE; Output = $out }
+        } else {
+            & $cmd.Source @all
+            return [pscustomobject]@{ ExitCode = $LASTEXITCODE; Output = "" }
+        }
     } finally {
         Pop-Location
     }
@@ -109,8 +114,8 @@ Write-Step "[1/7] Baixando/Atualizando Vencord..."
 $vencordDir = Join-Path $ScriptDir "Vencord"
 if (-not (Test-Path $vencordDir)) {
     Write-Host "    Clonando Vencord..."
-    $rc = Run-InDir $ScriptDir "git" @("clone", "https://github.com/Vendicated/Vencord.git", "Vencord")
-    if ($rc -ne 0) {
+    $r = Run-InDir $ScriptDir "git" @("clone", "https://github.com/Vendicated/Vencord.git", "Vencord")
+    if ($r.ExitCode -ne 0) {
         Write-Err "Falha ao clonar Vencord."
         pause; exit 1
     }
@@ -174,14 +179,17 @@ Write-Ok
 
 # PASSO 3) pnpm install
 Write-Step "[3/7] Instalando dependencias do Vencord (pnpm install)..."
-$rc = Run-InDir $vencordDir "pnpm" @("install", "--no-frozen-lockfile")
-if ($rc -ne 0) { Write-Warn "Dependencias podem ter falhado, tentando continuar..." }
+$r = Run-InDir $vencordDir "pnpm" @("install", "--no-frozen-lockfile")
+$nodeModulesOk = Test-Path (Join-Path $vencordDir "node_modules\.pnpm")
+if ($r.ExitCode -ne 0 -and -not $nodeModulesOk) {
+    Write-Warn "Dependencias podem ter falhado, tentando continuar..."
+}
 Write-Ok
 
 # PASSO 4) pnpm build
 Write-Step "[4/7] Compilando Vencord (pnpm build)..."
-$rc = Run-InDir $vencordDir "pnpm" @("build")
-if ($rc -ne 0) {
+$r = Run-InDir $vencordDir "pnpm" @("build")
+if ($r.ExitCode -ne 0) {
     Write-Err "Falha no build do Vencord."
     pause; exit 1
 }
@@ -221,28 +229,48 @@ Write-Host "    Processos encerrados."
 Write-Host ""
 Write-Host "Injetando Vencord no Discord Stable automaticamente..." -ForegroundColor Cyan
 $runInstaller = Join-Path $vencordDir "scripts\runInstaller.mjs"
-$injectFail = $false
+$discordStable = Join-Path $env:LOCALAPPDATA "Discord"
+$injectSuccess = $false
 
-$rc = Run-InDir $vencordDir "node" @($runInstaller, "--", "--install", "-branch", "stable")
-if ($rc -ne 0) {
+function Test-InjectOk($output) {
+    if ($output -match "Successfully (patched|installed)" -or $output -match "already patched.*Unpatching first.*Successfully patched") {
+        return $true
+    }
+    return $false
+}
+
+$r = Run-InDir $vencordDir "node" @($runInstaller, "--", "--install", "-branch", "stable") -CaptureOnly
+if (Test-InjectOk $r.Output) {
+    $injectSuccess = $true
+}
+
+if (-not $injectSuccess) {
     Write-Warn "Inject automatico falhou. Tentando com caminho customizado..."
-    $discordStable = Join-Path $env:LOCALAPPDATA "Discord"
     if (Test-Path $discordStable) {
-        $rc = Run-InDir $vencordDir "node" @($runInstaller, "--", "--install", "-branch", "stable", "-location", $discordStable)
-        if ($rc -ne 0) {
+        $r = Run-InDir $vencordDir "node" @($runInstaller, "--", "--install", "-location", $discordStable) -CaptureOnly
+        if (Test-InjectOk $r.Output) {
+            $injectSuccess = $true
+        }
+        if (-not $injectSuccess) {
             Write-Warn "Inject com caminho fixo tambem falhou. Tentando abrir CLI..."
             $installerCli = Join-Path $vencordDir "dist\Installer\VencordInstallerCli.exe"
             if (Test-Path $installerCli) {
-                & $installerCli --install -branch stable | Out-Null
-            } else {
-                $injectFail = $true
+                $out = & $installerCli --install -branch stable 2>&1 | Out-String
+                if (Test-InjectOk $out) {
+                    $injectSuccess = $true
+                }
             }
         }
-    } else {
-        $injectFail = $true
     }
 }
-if ($injectFail) { Write-Warn "Inject nao rodou automatico. Abra o Vencord e rode pnpm inject manualmente." }
+
+if (-not $injectSuccess) {
+    if (Test-Path (Join-Path $env:LOCALAPPDATA "Discord\app-*\_app.asar.unpacked")) {
+        Write-Warn "Parece que o Discord esta patchado, mas o injector reportou erro. Verifique manualmente."
+    } else {
+        Write-Warn "Inject nao rodou automatico. Abra a pasta Vencord e rode pnpm inject manualmente."
+    }
+}
 
 Set-Location $ScriptDir
 
