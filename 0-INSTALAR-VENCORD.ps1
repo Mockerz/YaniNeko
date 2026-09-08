@@ -369,6 +369,9 @@ if (-not $injectSuccess) {
         Write-Warn "Inject automatico nao funcionou. Abra a pasta:  $vencordDir"
         Write-Warn "  No terminal (barra de endereco -> cmd) digite:  pnpm inject"
         Write-Warn "  E escolha Stable no menu."
+        Write-Err "Instalacao interrompida: o Vencord nao foi confirmado no Discord Stable."
+        pause
+        exit 1
     }
 }
 

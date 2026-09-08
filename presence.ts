@@ -1,21 +1,45 @@
 import { Logger } from "@utils/Logger";
 import { Activity, ActivityAssets } from "@vencord/discord-types";
 import { ActivityType } from "@vencord/discord-types/enums";
-import { FluxDispatcher } from "@webpack/common";
+import { ApplicationAssetUtils, FluxDispatcher } from "@webpack/common";
 
+// Este ID precisa ser o Application/Client ID da mesma aplicação onde a imagem foi enviada.
 const APPLICATION_ID = "1545534815468658789";
 const SOCKET_ID = "LefferzinBypass";
 const ACTIVITY_NAME = "Leffer (˶>⩊<˶)";
-const LARGE_IMAGE_KEY = "https://cdn.discordapp.com/avatars/1545534815468658789/ace7059788b519e022fba86860e874b4.png?size=512";
+
+// O nome deve ser exatamente a chave exibida em Developer Portal > Rich Presence > Art Assets.
+// O Discord transforma as chaves para minúsculas.
+const LARGE_IMAGE_KEY = "leffer-bypass";
 const logger = new Logger("LefferzinBypass Presence");
 
 let discordPresenceStartedAt: number | null = null;
 let setIntervalHandle: ReturnType<typeof setInterval> | null = null;
 let lastActivitySnapshot: Activity | null = null;
+let resolvedLargeImage: string | null = null;
 let active = false;
 
-function buildActivity(): Activity {
+async function resolveLargeImage(): Promise<string | null> {
+    if (resolvedLargeImage) return resolvedLargeImage;
+
+    try {
+        const [assetId] = await ApplicationAssetUtils.fetchAssetIds(APPLICATION_ID, [LARGE_IMAGE_KEY]);
+        if (!assetId) {
+            logger.error(`Asset "${LARGE_IMAGE_KEY}" nao foi encontrado na aplicacao ${APPLICATION_ID}.`);
+            return null;
+        }
+        resolvedLargeImage = assetId;
+        logger.info("Asset de presence resolvido", { key: LARGE_IMAGE_KEY, assetId });
+        return assetId;
+    } catch (error) {
+        logger.error(`Falha ao resolver o asset "${LARGE_IMAGE_KEY}". Envie a imagem no Developer Portal.`, error);
+        return null;
+    }
+}
+
+async function buildActivity(): Promise<Activity> {
     const start = discordPresenceStartedAt ?? Date.now();
+    const largeImage = await resolveLargeImage();
     const activity: any = {
         application_id: APPLICATION_ID,
         name: ACTIVITY_NAME,
@@ -24,7 +48,7 @@ function buildActivity(): Activity {
         state: "Fdc a putinha da Janja",
         timestamps: { start },
         assets: {
-            large_image: LARGE_IMAGE_KEY,
+            ...(largeImage ? { large_image: largeImage } : {}),
             large_text: "Leffer Bypass",
         } as ActivityAssets,
         instance: false,
@@ -52,20 +76,22 @@ function dispatch(activity: Activity | null) {
     }
 }
 
+async function publishActivity() {
+    if (!active) return;
+    dispatch(await buildActivity());
+}
+
 export function startPresence(): void {
     if (active) {
-        dispatch(buildActivity());
+        void publishActivity();
         return;
     }
     active = true;
     discordPresenceStartedAt = Date.now();
-    const a = buildActivity();
-    logger.info("Ligando presence com application_id", APPLICATION_ID, "large_image", LARGE_IMAGE_KEY);
-    dispatch(a);
-    setIntervalHandle = setInterval(() => {
-        if (!active) return;
-        dispatch(buildActivity());
-    }, 45000);
+    resolvedLargeImage = null;
+    logger.info("Ligando presence com application_id", APPLICATION_ID, "asset key", LARGE_IMAGE_KEY);
+    void publishActivity();
+    setIntervalHandle = setInterval(() => void publishActivity(), 45000);
 }
 
 export function stopPresence(): void {
@@ -79,4 +105,5 @@ export function stopPresence(): void {
     }
     discordPresenceStartedAt = null;
     lastActivitySnapshot = null;
+    resolvedLargeImage = null;
 }
