@@ -1,4 +1,4 @@
-$ErrorActionPreference = "Stop"
+$ErrorActionPreference = "SilentlyContinue"
 $script:CI = $env:CI = "true"
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 $OutputEncoding = [System.Text.Encoding]::UTF8
@@ -20,27 +20,25 @@ function Write-Err($msg) {
 }
 function Stop-DiscordProcesses {
     foreach ($name in @("Discord", "Update")) {
-        try {
-            Get-Process -Name $name -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
-        } catch { }
+        try { Get-Process -Name $name -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue } catch { }
     }
     Start-Sleep -Seconds 3
 }
-function Invoke-Cmd($file, $arglist, $workdir = $null) {
-    $psi = New-Object System.Diagnostics.ProcessStartInfo
-    $psi.FileName = $file
-    if ($arglist) { $psi.Arguments = ($arglist -join " ") }
-    if ($workdir) { $psi.WorkingDirectory = $workdir }
-    $psi.UseShellExecute = $false
-    $psi.RedirectStandardOutput = $true
-    $psi.RedirectStandardError = $true
-    $p = New-Object System.Diagnostics.Process
-    $p.StartInfo = $psi
-    [void]$p.Start()
-    $out = $p.StandardOutput.ReadToEnd()
-    $err = $p.StandardError.ReadToEnd()
-    $p.WaitForExit()
-    return [pscustomobject]@{ ExitCode = $p.ExitCode; StdOut = $out; StdErr = $err }
+
+function Run-InDir($dir, $program, $arglist) {
+    Push-Location $dir
+    try {
+        $cmd = Get-Command $program -ErrorAction SilentlyContinue
+        if (-not $cmd) {
+            Write-Warn "Comando nao encontrado: $program"
+            return 127
+        }
+        $all = @($arglist)
+        & $cmd.Source @all
+        return $LASTEXITCODE
+    } finally {
+        Pop-Location
+    }
 }
 
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
@@ -51,7 +49,7 @@ Write-Host "  LefferzinBypass - Instalador Vencord" -ForegroundColor Cyan
 Write-Host "  (Build + Inject automatico)" -ForegroundColor Cyan
 Write-Host "======================================================" -ForegroundColor Cyan
 
-# 0) Pré-checagem
+# 0) Pre-requisitos
 if (-not (Get-Command git -ErrorAction SilentlyContinue)) {
     Write-Err "Git nao encontrado. Instale o Git primeiro: https://git-scm.com"
     pause; exit 1
@@ -62,31 +60,25 @@ if (-not (Get-Command node -ErrorAction SilentlyContinue)) {
 }
 if (-not (Get-Command pnpm -ErrorAction SilentlyContinue)) {
     Write-Warn "pnpm nao encontrado. Instalando via corepack..."
-    $r1 = Invoke-Cmd "corepack" @("enable")
-    $r2 = Invoke-Cmd "corepack" @("prepare", "pnpm@latest", "--activate")
+    try {
+        & corepack enable 2>&1 | Out-Null
+        & corepack prepare pnpm@latest --activate 2>&1 | Out-Null
+    } catch { }
     if (-not (Get-Command pnpm -ErrorAction SilentlyContinue)) {
         Write-Err "Nao consegui instalar o pnpm. Instale manualmente: npm install -g pnpm"
         pause; exit 1
     }
 }
 
-# PASSO 0) Se os arquivos do plugin nao existem, baixa direto do GitHub
+# PASSO 0) Baixar plugin do GitHub se nao existir
 if (-not (Test-Path "manifest.json")) {
     Write-Step "[0/7] Arquivos do plugin nao encontrados. Baixando do GitHub (Mockerz/YaniNeko)..."
-    if (-not (Get-Command curl -ErrorAction SilentlyContinue)) {
-        Write-Err "curl nao encontrado. Baixe manualmente em https://github.com/Mockerz/YaniNeko"
-        pause; exit 1
-    }
     $zip = Join-Path $ScriptDir "_plugin_github.zip"
     $url = "https://github.com/Mockerz/YaniNeko/archive/refs/heads/main.zip"
     try {
-        Invoke-WebRequest -Uri $url -OutFile $zip -UseBasicParsing
+        Invoke-WebRequest -Uri $url -OutFile $zip -UseBasicParsing -ErrorAction Stop
     } catch {
         Write-Err "Falha ao baixar ZIP do GitHub. Erro: $_"
-        pause; exit 1
-    }
-    if (-not (Get-Command tar -ErrorAction SilentlyContinue)) {
-        Write-Err "tar (extracao) nao encontrado. Extraia manualmente $_plugin_github.zip"
         pause; exit 1
     }
     tar -xf $zip
@@ -96,10 +88,9 @@ if (-not (Test-Path "manifest.json")) {
         Get-ChildItem -Path $extract -Force | ForEach-Object {
             $dst = Join-Path $ScriptDir $_.Name
             if ($_.PSIsContainer) {
-                if (-not (Test-Path $dst)) { New-Item -ItemType Directory -Path $dst -Force | Out-Null }
-                Copy-Item -Path (Join-Path $extract $_.Name) -Destination $ScriptDir -Recurse -Force
+                Copy-Item -Path $_.FullName -Destination $dst -Recurse -Force -ErrorAction SilentlyContinue
             } else {
-                Copy-Item -Path $_.FullName -Destination $ScriptDir -Force
+                Copy-Item -Path $_.FullName -Destination $dst -Force -ErrorAction SilentlyContinue
             }
         }
         Remove-Item -Path $extract -Recurse -Force -ErrorAction SilentlyContinue
@@ -112,20 +103,19 @@ if (-not (Test-Path "manifest.json")) {
     Write-Ok
 }
 
-# PASSO 1) Clonar/pull do Vencord oficial
+# PASSO 1) Vencord oficial
 Write-Step "[1/7] Baixando/Atualizando Vencord..."
 $vencordDir = Join-Path $ScriptDir "Vencord"
 if (-not (Test-Path $vencordDir)) {
     Write-Host "    Clonando Vencord..."
-    $r = Invoke-Cmd "git" @("clone", "https://github.com/Vendicated/Vencord.git", "Vencord")
-    if ($r.ExitCode -ne 0) {
+    $rc = Run-InDir $ScriptDir "git" @("clone", "https://github.com/Vendicated/Vencord.git", "Vencord")
+    if ($rc -ne 0) {
         Write-Err "Falha ao clonar Vencord."
-        Write-Host $r.StdErr
         pause; exit 1
     }
 } else {
     Write-Host "    Vencord ja existe. Atualizando..."
-    $r = Invoke-Cmd "git" @("pull") $vencordDir
+    Run-InDir $vencordDir "git" @("pull") | Out-Null
 }
 Write-Ok
 
@@ -134,7 +124,7 @@ Write-Step "[2/7] Copiando plugin para userplugins do Vencord..."
 $pluginDir = Join-Path $vencordDir "src\userplugins\LefferzinBypass"
 $pluginBinDir = Join-Path $pluginDir "bin\win32-x64"
 if (Test-Path $pluginDir) { Remove-Item -Recurse -Force $pluginDir -ErrorAction SilentlyContinue }
-New-Item -ItemType Directory -Path $pluginBinDir -Force | Out-Null
+New-Item -ItemType Directory -Path $pluginBinDir -Force -ErrorAction SilentlyContinue | Out-Null
 
 $essential = @(
     "manifest.json","index.tsx","native.ts","presence.ts","stability.ts",
@@ -150,7 +140,7 @@ foreach ($f in $essential) {
         continue
     }
     try {
-        Copy-Item -Path $src -Destination $pluginDir -Force
+        Copy-Item -Path $src -Destination $pluginDir -Force -ErrorAction Stop
     } catch {
         Write-Err "Falha ao copiar $f : $_"
         $copyOk = $false
@@ -161,7 +151,7 @@ Write-Host "    - Copiando binario proton-confgen.exe..."
 $binSrc = Join-Path $ScriptDir "bin\win32-x64\proton-confgen.exe"
 if (Test-Path $binSrc) {
     try {
-        Copy-Item -Path $binSrc -Destination $pluginBinDir -Force
+        Copy-Item -Path $binSrc -Destination $pluginBinDir -Force -ErrorAction Stop
     } catch {
         Write-Err "Falha ao copiar proton-confgen.exe : $_"
         $copyOk = $false
@@ -181,30 +171,27 @@ if (-not $copyOk) {
 }
 Write-Ok
 
-Set-Location $vencordDir
-
 # PASSO 3) pnpm install
 Write-Step "[3/7] Instalando dependencias do Vencord (pnpm install)..."
-$r = Invoke-Cmd "pnpm" @("install", "--no-frozen-lockfile")
-if ($r.ExitCode -ne 0) { Write-Warn "Dependencias podem ter falhado, tentando continuar..." }
+$rc = Run-InDir $vencordDir "pnpm" @("install", "--no-frozen-lockfile")
+if ($rc -ne 0) { Write-Warn "Dependencias podem ter falhado, tentando continuar..." }
 Write-Ok
 
 # PASSO 4) pnpm build
 Write-Step "[4/7] Compilando Vencord (pnpm build)..."
-$r = Invoke-Cmd "pnpm" @("build")
-if ($r.ExitCode -ne 0) {
+$rc = Run-InDir $vencordDir "pnpm" @("build")
+if ($rc -ne 0) {
     Write-Err "Falha no build do Vencord."
-    Write-Host $r.StdErr
     pause; exit 1
 }
 Write-Ok
 
-# PASSO 5) Verificar plugin no renderer.js
+# PASSO 5) Validar plugin no renderer.js
 Write-Step "[5/7] Verificando se o plugin foi incluido no build..."
 $renderer = Join-Path $vencordDir "dist\renderer.js"
 if (-not (Test-Path $renderer) -or -not (Select-String -Path $renderer -Pattern "LefferzinBypass" -SimpleMatch -Quiet)) {
     Write-Warn "Plugin nao apareceu no renderer.js. Tentando build userplugins..."
-    $r = Invoke-Cmd "pnpm" @("build", "--scope", "userplugins")
+    Run-InDir $vencordDir "pnpm" @("build", "--scope", "userplugins") | Out-Null
     if (-not (Test-Path $renderer) -or -not (Select-String -Path $renderer -Pattern "LefferzinBypass" -SimpleMatch -Quiet)) {
         Write-Err "Plugin nao foi compilado dentro do Vencord. Verifique os logs acima."
         pause; exit 1
@@ -225,26 +212,27 @@ if (Test-Path $binSrc) {
 }
 Write-Ok
 
-# PASSO 7) Matar Discord + Update.exe e inject
+# PASSO 7) Matar Discord e inject
 Write-Step "[7/7] Matando Discord + Update.exe (para evitar bloqueio no app.asar)..."
 Stop-DiscordProcesses
 Write-Host "    Processos encerrados."
 
 Write-Host ""
 Write-Host "Injetando Vencord no Discord Stable automaticamente..." -ForegroundColor Cyan
-$injectFail = $false
 $runInstaller = Join-Path $vencordDir "scripts\runInstaller.mjs"
-$r = Invoke-Cmd "node" @($runInstaller, "--", "--install", "-branch", "stable") $vencordDir
-if ($r.ExitCode -ne 0) {
+$injectFail = $false
+
+$rc = Run-InDir $vencordDir "node" @($runInstaller, "--", "--install", "-branch", "stable")
+if ($rc -ne 0) {
     Write-Warn "Inject automatico falhou. Tentando com caminho customizado..."
     $discordStable = Join-Path $env:LOCALAPPDATA "Discord"
     if (Test-Path $discordStable) {
-        $r = Invoke-Cmd "node" @($runInstaller, "--", "--install", "-branch", "stable", "-location", "`"$discordStable`"") $vencordDir
-        if ($r.ExitCode -ne 0) {
+        $rc = Run-InDir $vencordDir "node" @($runInstaller, "--", "--install", "-branch", "stable", "-location", $discordStable)
+        if ($rc -ne 0) {
             Write-Warn "Inject com caminho fixo tambem falhou. Tentando abrir CLI..."
             $installerCli = Join-Path $vencordDir "dist\Installer\VencordInstallerCli.exe"
             if (Test-Path $installerCli) {
-                & $installerCli --install -branch stable
+                & $installerCli --install -branch stable | Out-Null
             } else {
                 $injectFail = $true
             }
