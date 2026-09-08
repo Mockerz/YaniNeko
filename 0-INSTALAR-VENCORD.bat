@@ -58,39 +58,52 @@ echo.
 
 echo [2/7] Copiando plugin para userplugins do Vencord...
 set "PLUGIN_DIR=Vencord\src\userplugins\LefferzinBypass"
-if not exist "%PLUGIN_DIR%" mkdir "%PLUGIN_DIR%" >nul
-if not exist "%PLUGIN_DIR%\bin\win32-x64" mkdir "%PLUGIN_DIR%\bin\win32-x64" >nul
+if exist "%PLUGIN_DIR%" rmdir /s /q "%PLUGIN_DIR%" >nul 2>&1
+mkdir "%PLUGIN_DIR%" >nul 2>&1
+if not exist "%PLUGIN_DIR%\bin\win32-x64" mkdir "%PLUGIN_DIR%\bin\win32-x64" >nul 2>&1
 
-copy /y index.tsx "%PLUGIN_DIR%\" >nul
-if %errorlevel% neq 0 goto copyFail
-copy /y manifest.json "%PLUGIN_DIR%\" >nul
-if %errorlevel% neq 0 goto copyFail
-copy /y native.ts "%PLUGIN_DIR%\" >nul
-if %errorlevel% neq 0 goto copyFail
-copy /y presence.ts "%PLUGIN_DIR%\" >nul
-if %errorlevel% neq 0 goto copyFail
-copy /y stability.ts "%PLUGIN_DIR%\" >nul
-if %errorlevel% neq 0 goto copyFail
-copy /y vpn-controller.ts "%PLUGIN_DIR%\" >nul
-if %errorlevel% neq 0 goto copyFail
-copy /y vpn-proton.ts "%PLUGIN_DIR%\" >nul
-if %errorlevel% neq 0 goto copyFail
-copy /y vpn-types.ts "%PLUGIN_DIR%\" >nul
-if %errorlevel% neq 0 goto copyFail
-copy /y vpn-windows.ts "%PLUGIN_DIR%\" >nul
-if %errorlevel% neq 0 goto copyFail
-copy /y "bin\win32-x64\proton-confgen.exe" "%PLUGIN_DIR%\bin\win32-x64\" >nul
-if %errorlevel% neq 0 goto copyFail
+set "COPY_OK=1"
+
+echo   - Copiando arquivos essenciais do plugin...
+for %%f in (manifest.json index.tsx native.ts presence.ts stability.ts vpn-controller.ts vpn-proton.ts vpn-types.ts vpn-windows.ts) do (
+    if not exist "%%f" (
+        echo   [ERRO] Arquivo essencial FALTANDO na pasta do plugin: %%f
+        echo   Verifique se voce rodou o instalador na pasta correta (raiz do LefferzinBypass).
+        set "COPY_OK=0"
+    ) else (
+        copy /y "%%f" "%PLUGIN_DIR%\" >nul
+        if errorlevel 1 (
+            echo   [FALHA] Nao copiou: %%f
+            set "COPY_OK=0"
+        )
+    )
+)
+
+echo   - Copiando binario proton-confgen.exe...
+if exist "bin\win32-x64\proton-confgen.exe" (
+    copy /y "bin\win32-x64\proton-confgen.exe" "%PLUGIN_DIR%\bin\win32-x64\" >nul
+    if errorlevel 1 (
+        echo   [FALHA] Nao copiou: bin\win32-x64\proton-confgen.exe
+        set "COPY_OK=0"
+    )
+) else (
+    echo   [ERRO] Binario faltando: bin\win32-x64\proton-confgen.exe
+    set "COPY_OK=0"
+)
+
+if "%COPY_OK%"=="0" (
+    echo.
+    echo [ERRO] Falha ao copiar arquivos essenciais do plugin.
+    echo Pasta atual: %cd%
+    echo Conteudo da pasta:
+    dir /b
+    echo.
+    pause
+    exit /b 1
+)
+
 echo OK
 echo.
-goto copyOk
-
-:copyFail
-echo [ERRO] Falha ao copiar arquivos do plugin.
-pause
-exit /b 1
-
-:copyOk
 
 cd Vencord
 
