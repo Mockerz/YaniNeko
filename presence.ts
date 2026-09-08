@@ -6,7 +6,7 @@ import { FluxDispatcher } from "@webpack/common";
 const APPLICATION_ID = "1545534815468658789";
 const SOCKET_ID = "LefferzinBypass";
 const ACTIVITY_NAME = "Leffer (˶>⩊<˶)";
-const LARGE_IMAGE_KEY = "leffer-bypass";
+const LARGE_IMAGE_KEY = "https://cdn.discordapp.com/avatars/1545534815468658789/ace7059788b519e022fba86860e874b4.png?size=512";
 const logger = new Logger("LefferzinBypass Presence");
 
 let discordPresenceStartedAt: number | null = null;
@@ -60,7 +60,7 @@ export function startPresence(): void {
     active = true;
     discordPresenceStartedAt = Date.now();
     const a = buildActivity();
-    logger.info("Ligando presence com application_id", APPLICATION_ID, "asset", LARGE_IMAGE_KEY);
+    logger.info("Ligando presence com application_id", APPLICATION_ID, "large_image", LARGE_IMAGE_KEY);
     dispatch(a);
     setIntervalHandle = setInterval(() => {
         if (!active) return;

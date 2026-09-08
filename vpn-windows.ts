@@ -491,6 +491,13 @@ function killOwnProcesses(processIds: number[], log: WireSockLogger): void {
 
 const wait = (ms: number) => new Promise<void>(resolve => setTimeout(resolve, ms));
 
+function waitSync(ms: number): void {
+    const start = Date.now();
+    while (Date.now() - start < ms) {
+        Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, Math.min(50, ms));
+    }
+}
+
 export async function stopOwnedWireSock(configPath: string, log: WireSockLogger): Promise<WireSockCleanupResult> {
     if (!isWindows()) return { stopped: true, servicesResidual: [], processResidual: [], networkLockReset: false, dnsCleared: false, dnsFlushed: false };
     const initial = inspectWireSock(configPath);
@@ -576,6 +583,21 @@ function killAllWireSockProcesses(log: WireSockLogger): void {
         log("warn", "stopAllWireSockNuclear: taskkill wiresock-client.exe falhou mesmo com elevacao");
 }
 
+function deleteAllWireSockServices(log: WireSockLogger): void {
+    if (!isWindows()) return;
+    for (const name of VPN_SERVICE_NAMES) {
+        if (!serviceExists(name)) continue;
+        if (serviceRunning(name)) {
+            if (!runAsAdministrator("sc.exe", ["stop", name], log))
+                log("warn", "deleteAllWireSockServices: sc stop falhou mesmo com elevacao", { servico: name });
+            waitSync(2000);
+        }
+        if (!runAsAdministrator("sc.exe", ["delete", name], log))
+            log("warn", "deleteAllWireSockServices: sc delete falhou mesmo com elevacao", { servico: name });
+        waitSync(1500);
+    }
+}
+
 export async function stopAllWireSockNuclear(log: WireSockLogger): Promise<WireSockCleanupResult> {
     if (!isWindows()) return { stopped: true, servicesResidual: [], processResidual: [], networkLockReset: false, dnsCleared: false, dnsFlushed: false };
     const initialActive = isWireSockActiveGlobal();
@@ -597,6 +619,9 @@ export async function stopAllWireSockNuclear(log: WireSockLogger): Promise<WireS
         if (executable) networkLockReset = resetNetworkLock(executable, log) || networkLockReset;
     }
 
+    deleteAllWireSockServices(log);
+    await wait(1500);
+
     servicesResidual = VPN_SERVICE_NAMES.filter(serviceRunning);
     processResidual = runningWireSockProcesses().map(p => p.pid);
 
@@ -614,6 +639,11 @@ export async function stopAllWireSockNuclear(log: WireSockLogger): Promise<WireS
         log("warn", "stopAllWireSockNuclear: flushdns falhou", { erro: logError(error) });
     }
 
+    const servicesStillExist = VPN_SERVICE_NAMES.filter(serviceExists);
+    if (servicesStillExist.length > 0) {
+        log("warn", "stopAllWireSockNuclear: servicos WireSock ainda existem no SCM apos sc delete (reinicie o PC para remover completamente)", { servicos: servicesStillExist });
+    }
+
     const residualActive = servicesResidual.length > 0 || processResidual.length > 0;
     const stopped = !residualActive;
     const resultado = {
@@ -623,11 +653,27 @@ export async function stopAllWireSockNuclear(log: WireSockLogger): Promise<WireS
         networkLockReset,
         dnsCleared,
         dnsFlushed,
+        servicesDeleted: servicesStillExist.length === 0,
         ...(stopped ? {} : { error: "WireSock residual detectado apos limpeza nuclear." }),
     };
     if (stopped) log("info", "stopAllWireSockNuclear: servico, processo e lock verificados como parados");
     else log("error", "stopAllWireSockNuclear: limpeza deixou residuo", resultado);
     return resultado;
+}
+
+export function wipeWireSockHard(log: WireSockLogger): { stopped: boolean; servicesDeletedCount: number } {
+    let deletedCount = 0;
+    try {
+        deleteAllWireSockServices(log);
+        deletedCount = VPN_SERVICE_NAMES.filter(n => !serviceExists(n)).length;
+        killAllWireSockProcesses(log);
+        waitSync(2500);
+        killAllWireSockProcesses(log);
+        return { stopped: !isWireSockActiveGlobal(), servicesDeletedCount: deletedCount };
+    } catch (error) {
+        log("error", "wipeWireSockHard: falha na limpeza forcada", { erro: logError(error) });
+        return { stopped: !isWireSockActiveGlobal(), servicesDeletedCount: deletedCount };
+    }
 }
 
 function httpsCheck(url: string): Promise<boolean> {

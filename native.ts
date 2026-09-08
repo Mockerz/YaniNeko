@@ -315,12 +315,85 @@ function solveCaptcha(rawUrl: string, parent: BrowserWindow | null): Promise<Cap
     });
 }
 
-export function enable(_: IpcMainInvokeEvent) {
-    return controller.enable();
+export function enable(_: IpcMainInvokeEvent, relaunch: unknown = false) {
+    const shouldRelaunch = relaunch === true || relaunch === "true";
+    return controller.enable(shouldRelaunch);
 }
 
-export function shutdown(_: IpcMainInvokeEvent) {
-    return controller.shutdown(true);
+export function shutdown(_: IpcMainInvokeEvent, relaunch: unknown = false) {
+    const shouldRelaunch = relaunch === true || relaunch === "true";
+    return controller.shutdown(shouldRelaunch);
+}
+
+export function wipeWireSock(_: IpcMainInvokeEvent) {
+    return controller.wipeEverything();
+}
+
+export async function fullLogout(_: IpcMainInvokeEvent): Promise<{
+    success: boolean;
+    wipedStopped?: boolean;
+    servicesDeleted?: number;
+    protonSessionRemoved?: boolean;
+    shutdownSuccess?: boolean;
+    error?: string;
+}> {
+    quitting = true;
+    log("info", "fullLogout: inicio do logout completo atomico");
+
+    let wipedStopped = false;
+    let servicesDeleted = 0;
+    let shutdownSuccess = false;
+    let protonSessionRemoved = false;
+
+    try {
+        try {
+            const wipe = controller.wipeEverything();
+            wipedStopped = wipe.stopped;
+            servicesDeleted = wipe.servicesDeletedCount;
+            log("info", "fullLogout: wipe concluido", { parou: wipedStopped, servicos_deletados: servicesDeleted });
+        } catch (error) {
+            log("error", "fullLogout: wipe lancou excecao, continuando mesmo assim", { erro: safeDiagnosticDetail(error) });
+        }
+
+        try {
+            const shutdownResult = await controller.shutdown(false, true);
+            shutdownSuccess = shutdownResult.success === true;
+            log("info", "fullLogout: shutdown nuclear concluido", { sucesso: shutdownSuccess, estado: shutdownResult.state, erro: shutdownResult.error });
+        } catch (error) {
+            log("error", "fullLogout: shutdown lancou excecao, continuando mesmo assim", { erro: safeDiagnosticDetail(error) });
+        }
+
+        try {
+            protonSessionRemoved = controller.logoutProton();
+            log("info", "fullLogout: sessao Proton removida e arquivos deletados", { removido: protonSessionRemoved });
+        } catch (error) {
+            log("error", "fullLogout: logoutProton lancou excecao", { erro: safeDiagnosticDetail(error) });
+        }
+
+        setStoredUsername("");
+
+        const success = protonSessionRemoved || (wipedStopped && servicesDeleted >= 0);
+        quitting = false;
+        return {
+            success,
+            wipedStopped,
+            servicesDeleted,
+            shutdownSuccess,
+            protonSessionRemoved,
+        };
+    } catch (error) {
+        const detail = safeDiagnosticDetail(error);
+        log("error", "fullLogout: excecao geral", { erro: detail });
+        quitting = false;
+        return {
+            success: false,
+            wipedStopped,
+            servicesDeleted,
+            shutdownSuccess,
+            protonSessionRemoved,
+            error: detail,
+        };
+    }
 }
 
 export function restoreNetwork(_: IpcMainInvokeEvent) {
@@ -443,6 +516,12 @@ app.on("before-quit", event => {
     if (!controller.hasCleanupWork()) return;
     event.preventDefault();
     quitting = true;
+    try {
+        const wipeResult = controller.wipeEverything();
+        log("info", "before-quit: wipe forcado WireSock", { resultado: wipeResult });
+    } catch (error) {
+        log("warn", "before-quit: wipe falhou, tentando shutdown fallback", { erro: safeDiagnosticDetail(error) });
+    }
     void controller.shutdown(false).then(result => {
         if (result.success) {
             app.exit(0);
@@ -452,27 +531,39 @@ app.on("before-quit", event => {
         log("error", "fechamento aguardou porque a restauração da VPN não foi confirmada", { estado: result.state, erro: result.error });
     }).catch(error => {
         quitting = false;
-        log("error", "falha ao restaurar a rede antes do fechamento", { erro: safeDiagnosticDetail(error, 500) });
+        log("error", "falha ao restaurar a rede antes do fechamento", { erro: safeDiagnosticDetail(error) });
     });
 });
 
 app.on("window-all-closed", () => {
     if (quitting) return;
+    try {
+        const wipeResult = controller.wipeEverything();
+        log("info", "window-all-closed: wipe forcado WireSock", { resultado: wipeResult });
+    } catch (error) {
+        log("warn", "window-all-closed: wipe falhou", { erro: safeDiagnosticDetail(error) });
+    }
     void controller.shutdown(false).then(() => {
         log("info", "wireguard derrubado depois que todas as janelas fecharam");
     }).catch(error => {
-        log("error", "falha ao derrubar VPN no window-all-closed", { erro: safeDiagnosticDetail(error, 500) });
+        log("error", "falha ao derrubar VPN no window-all-closed", { erro: safeDiagnosticDetail(error) });
     });
 });
 
 const shutdownSignal = (source: string) => {
     if (quitting) return;
     quitting = true;
+    try {
+        const wipeResult = controller.wipeEverything();
+        log("info", `${source}: wipe forcado WireSock`, { resultado: wipeResult });
+    } catch (error) {
+        log("warn", `${source}: wipe falhou`, { erro: safeDiagnosticDetail(error) });
+    }
     void controller.shutdown(false).then(() => {
         log("info", `wireguard derrubado via ${source}`);
         process.exit(0);
     }).catch(error => {
-        log("error", `falha ao restaurar VPN via ${source}`, { erro: safeDiagnosticDetail(error, 500) });
+        log("error", `falha ao restaurar VPN via ${source}`, { erro: safeDiagnosticDetail(error) });
         process.exit(1);
     });
 };
@@ -494,7 +585,7 @@ async function tryAutoEnable(attempt: number, maxAttempts: number) {
             log("info", "plugin ativado, mas sem login/perfil Proton; pulando auto-enable no boot");
             return;
         }
-        const result = await controller.enable();
+        const result = await controller.enable(false);
         if (result.success) {
             log("info", `bypass ativado automaticamente no boot (tentativa ${attempt}/${maxAttempts})`, { estado: result.state });
             return;

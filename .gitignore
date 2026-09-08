@@ -1,55 +1,19 @@
-# Vendor sources (baixados automaticamente pelo instalador FACIL, NAO commitar)
-/Vencord/
-/Equicord/
-/Vencord*/
-/Equicord*/
-
-# Dependencias e build artefacts
+Vencord/
 node_modules/
 dist/
-dist-*/
-out/
 build/
+out/
 *.log
-pnpm-install*.log
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
-.eslintcache
-
-# Portable Node/pnpm baixados pelo instalador no %LOCALAPPDATA% (fora do repo, mas ignore alias)
-NodePortable/
-PnpmPortable/
-
-# System
 .DS_Store
 Thumbs.db
-desktop.ini
-
-# IDE
-.vscode/
-.idea/
-*.swp
-*.swo
-
-# Sensitive
+wireguard.conf
+wireguard-client.conf
+optimized-profile.conf
+optimization-marker.json
+route-snapshot.json
+*.lock.json
+*.tmp
 .env
 .env.local
-.env.*.local
-
-# Arquivos de desenvolvimento LOCAL (nao vao pro publico — mantem no seu disco)
-0-INSTALADOR-SMART.bat
-0-INSTALADOR-SMART.ps1
-0-LIMPAR-WIRESOCK.bat
-1-INSTALAR.bat
-2-REINJETAR.bat
-3-DESINSTALAR.bat
-4-BUILD.bat
-
-# Arquivos pessoais/historico local
-/versaoexe/
-/versaoold/
-icon.*
-leffer-bypass.*
-*.zip
-COMO-INSTALAR.md
+*.asar
+*.unpacked/

@@ -228,12 +228,39 @@ export class PluginVpnController {
         };
     }
 
-    public enable(): Promise<VpnOperationResult> {
-        return this.serial(() => this.startInternal(true));
+    public enable(relaunch = true): Promise<VpnOperationResult> {
+        return this.serial(() => this.startInternal(relaunch));
     }
 
-    public shutdown(relaunch = true): Promise<VpnOperationResult> {
-        return this.serial(() => this.stopInternal(relaunch, true));
+    public shutdown(relaunch = true, forceNuclear = true): Promise<VpnOperationResult> {
+        return this.serial(() => this.stopInternal(relaunch, forceNuclear));
+    }
+
+    public wipeEverything(): { stopped: boolean; servicesDeletedCount: number } {
+        this.stopWatchdog();
+        try {
+            this.externalReason = null;
+            this.state = "stopping";
+            this.options.log("info", "wipeEverything: limpeza forcada total do WireSock acionada");
+            const result = windows.wipeWireSockHard(this.options.log);
+            this.discordPid = null;
+            this.pingMs = null;
+            this.routeId = null;
+            this.routeCountry = null;
+            this.routeCity = null;
+            this.routeLabel = null;
+            this.removeProbe();
+            const owner = this.readOwner();
+            if (owner) this.releaseOwnership(owner);
+            this.state = result.stopped ? "inactive" : "recovery_required";
+            this.setDiagnostic("wireguard", result.stopped, `wipe: parado=${result.stopped} | servicos_deletados=${result.servicesDeletedCount}/2`);
+            return result;
+        } catch (error) {
+            this.state = "recovery_required";
+            this.setDiagnostic("wireguard", false, errorMessage(error));
+            this.options.log("error", "wipeEverything: excecao", { erro: errorMessage(error) });
+            return { stopped: false, servicesDeletedCount: 0 };
+        }
     }
 
     public restoreNetwork(): Promise<VpnOperationResult> {

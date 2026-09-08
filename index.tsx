@@ -261,6 +261,15 @@ function VpnPanel() {
         return () => clearInterval(timer);
     }, []);
 
+    useEffect(() => {
+        if (!Native) return;
+        if (status?.active === true) {
+            startPresence();
+        } else if (status?.active === false || status?.state === "inactive" || status?.state === "blocked_external" || status?.state === "recovery_required") {
+            stopPresence();
+        }
+    }, [status?.active, status?.state, Native]);
+
     const login = async () => {
         if (!Native || busy || optimizing || starting || logoutBusy) return;
         setBusy(true);
@@ -272,13 +281,15 @@ function VpnPanel() {
             showToast("Logado na Proton. Subindo bypass automaticamente...", Toasts.Type.SUCCESS);
             await refresh();
             if (Native) {
-                const enabled = await Native.enable();
+                const enabled = await Native.enable(false);
                 if (enabled.success === false) {
+                    stopPresence();
                     showToast(
                         `Logado, mas bypass ainda nao ativado: ${enabled.error || enabled.message || "clique em Otimizar rota primeiro"}`,
                         (Toasts.Type as { WARNING?: unknown }).WARNING ?? Toasts.Type.MESSAGE
                     );
                 } else {
+                    startPresence();
                     showToast("Login OK + bypass ativado.", Toasts.Type.SUCCESS);
                 }
                 await refresh();
@@ -358,11 +369,13 @@ function VpnPanel() {
         setStarting(true);
         setBusy(true);
         try {
-            const result = await Native.enable() as { success?: boolean; error?: string; message?: string };
+            const result = await Native.enable(false) as { success?: boolean; error?: string; message?: string };
             if (result.success === false) throw new Error(result.error || result.message || "Não foi possível ativar o bypass.");
+            startPresence();
             showToast("Bypass ativado - VPN em tunel isolado.", Toasts.Type.SUCCESS);
             await refresh();
         } catch (error) {
+            stopPresence();
             showToast(`Start Bypass: ${error instanceof Error ? error.message : String(error)}`, Toasts.Type.FAILURE);
         } finally {
             setStarting(false);
@@ -375,19 +388,17 @@ function VpnPanel() {
         setLogoutBusy(true);
         setBusy(true);
         try {
-            try {
-                const stopResult = await Native.shutdown() as { success?: boolean; error?: string; message?: string };
-                if (stopResult?.success === false) {
-                    throw new Error(stopResult.error || stopResult.message || "Não conseguiu desligar a VPN antes de deslogar.");
-                }
-            } catch (error) {
-                logger.warn("shutdown falhou, prosseguindo com logout mesmo assim", error);
+            stopPresence();
+            const typed = Native as PluginNative<typeof import("./native")>;
+            const result = await typed.fullLogout();
+            if (!result.success) {
+                const msg = result.error || "Logout teve falhas parciais — tente rodar o 0-LIMPAR-WIRESOCK.bat.";
+                logger.warn("fullLogout retornou parcial:", result);
+                showToast(`Sair: ${msg}`, Toasts.Type.FAILURE);
+            } else {
+                showToast("Deslogado — VPN encerrada, serviços WireSock removidos e conta Proton desconectada.", Toasts.Type.SUCCESS);
+                logger.info("fullLogout concluido:", result);
             }
-            const result = await Native.logoutProton() as { success?: boolean; cleaned?: boolean; error?: string };
-            if (result?.success === false) {
-                throw new Error(result.error || "Não conseguiu limpar a sessao Proton.");
-            }
-            showToast("Deslogado — VPN desligada e sessao removida.", Toasts.Type.SUCCESS);
             setUsername("");
             setPassword("");
             setTwoFactorCode("");
@@ -911,17 +922,24 @@ export default definePlugin({
     start() {
         forceRegion();
         startStreamClaimWatch();
-        startPresence();
         if (!Native) return;
         Native.getProtonSettings().then(settings => {
             const hasUsername = typeof settings?.protonUsername === "string" && settings.protonUsername.trim() !== "";
             const hasSession = typeof (settings as { sessionUsername?: unknown })?.sessionUsername === "string"
                 && (settings as { sessionUsername: string }).sessionUsername.trim() !== "";
             if (!hasUsername && !hasSession) return;
-            void Native.enable().then(result => {
-                if (result?.success === false)
-                    showToast(`Lefferzin Bypass não conseguiu ativar a VPN: ${result.error || result.message || "rode o 0-LIMPAR-WIRESOCK.bat"}`, Toasts.Type.FAILURE);
-            }).catch(error => logger.error("Não conseguiu falar com o processo desktop", error));
+            void Native.enable(false).then(result => {
+                if (result?.success === true) {
+                    startPresence();
+                    void refresh();
+                } else {
+                    stopPresence();
+                    showToast(`Lefferzin Bypass não conseguiu ativar a VPN: ${result?.error || result?.message || "rode o 0-LIMPAR-WIRESOCK.bat"}`, Toasts.Type.FAILURE);
+                }
+            }).catch(error => {
+                stopPresence();
+                logger.error("Não conseguiu falar com o processo desktop", error);
+            });
         }).catch(() => {});
     },
 
@@ -929,6 +947,11 @@ export default definePlugin({
         stopPresence();
         stopStreamClaimWatch();
         restoreRegion();
-        Native?.shutdown().catch(error => logger.error("Não conseguiu falar com o processo desktop", error));
+        try {
+            (Native as unknown as { wipeWireSock?: () => unknown })?.wipeWireSock?.();
+        } catch (error) {
+            logger.warn("wipe no stop falhou, tentando shutdown fallback:", error);
+            Native?.shutdown().catch(e => logger.error("shutdown fallback tambem falhou", e));
+        }
     }
 });
