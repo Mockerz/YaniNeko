@@ -13,4 +13,4 @@ Depois de instalar o plugin atualizado:
 
 A versão anterior passava diretamente uma URL de avatar do CDN no evento interno `LOCAL_ACTIVITY_UPDATE`. O Vencord resolve assets registrados por meio de `ApplicationAssetUtils.fetchAssetIds`; a versão 1.0.1 usa esse fluxo e grava no log quando o asset não foi cadastrado ou o Client ID não corresponde à aplicação.
 
-O instalador também foi ajustado para manter o `.ps1` local se o download do GitHub falhar e para não declarar a instalação concluída quando a injeção do Vencord não for confirmada.
+O instalador também foi ajustado para manter o `.ps1` local se o download do GitHub falhar, reconhecer a mensagem `✔ Success!` do injector CLI e não declarar a instalação concluída quando a injeção do Vencord não for confirmada. No log antigo, o Vencord já havia sido instalado, mas o instalador não reconhecia `✔ Success!` e iniciava desnecessariamente o `pnpm inject` interativo.
