@@ -74,7 +74,8 @@ if (-not (Get-Command pnpm -ErrorAction SilentlyContinue)) {
 if (-not (Test-Path "manifest.json")) {
     Write-Step "[0/7] Arquivos do plugin nao encontrados. Baixando do GitHub (Mockerz/YaniNeko)..."
     $zip = Join-Path $ScriptDir "_plugin_github.zip"
-    $url = "https://github.com/Mockerz/YaniNeko/archive/refs/heads/main.zip"
+    $suffix = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds()
+    $url = "https://github.com/Mockerz/YaniNeko/archive/refs/heads/main.zip?v=$suffix"
     try {
         Invoke-WebRequest -Uri $url -OutFile $zip -UseBasicParsing -ErrorAction Stop
     } catch {
