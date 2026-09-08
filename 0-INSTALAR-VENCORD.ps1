@@ -169,6 +169,24 @@ if (-not (Test-Path "manifest.json")) {
         Write-Err "Ainda nao foi possivel encontrar os arquivos do plugin. Baixe manualmente do GitHub."
         pause; exit 1
     }
+    # GitHub bloqueia arquivos .exe no archive ZIP algumas vezes. Se o binario faltar ou for 0KB, baixa direto do raw.githubusercontent
+    $binDst = Join-Path $ScriptDir "bin\win32-x64\proton-confgen.exe"
+    $binFaltando = -not (Test-Path $binDst)
+    if (-not $binFaltando) {
+        $fi = Get-Item $binDst
+        if ($fi.Length -eq 0) { $binFaltando = $true }
+    }
+    if ($binFaltando) {
+        Write-Warn "Binario proton-confgen.exe nao veio no zip. Baixando separadamente..."
+        New-Item -ItemType Directory -Path (Split-Path -Parent $binDst) -Force -ErrorAction SilentlyContinue | Out-Null
+        try {
+            $binUrl = "https://raw.githubusercontent.com/Mockerz/YaniNeko/main/bin/win32-x64/proton-confgen.exe?t=$suffix"
+            Invoke-WebRequest -Uri $binUrl -OutFile $binDst -UseBasicParsing -ErrorAction Stop
+        } catch {
+            Write-Err "Falha ao baixar binario proton-confgen.exe. Erro: $_"
+            pause; exit 1
+        }
+    }
     Write-Ok
 }
 
