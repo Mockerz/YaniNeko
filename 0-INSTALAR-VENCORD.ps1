@@ -46,6 +46,57 @@ function Run-InDir($dir, $program, $arglist, [switch]$CaptureOnly) {
     }
 }
 
+function Install-PortableGit($WorkDir) {
+    Write-Host "    Instalando Git (portatil, winget)..."
+    if (Get-Command winget -ErrorAction SilentlyContinue) {
+        $r = Start-Process -FilePath winget -ArgumentList @("install", "--id", "Git.Git", "--silent", "--accept-package-agreements", "--accept-source-agreements") -Wait -NoNewWindow -PassThru
+        $env:Path = [System.Environment]::GetEnvironmentVariable("Path","Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path","User")
+        if (Get-Command git -ErrorAction SilentlyContinue) { return $true }
+    }
+    Write-Warn "winget falhou. Tentando baixar MinGit portatil..."
+    $gitZip = Join-Path $WorkDir "mingit.zip"
+    $gitDir = Join-Path $WorkDir "git"
+    $url = "https://github.com/git-for-windows/git/releases/latest/download/MinGit-2.46.0-64-bit.zip"
+    try {
+        Invoke-WebRequest -Uri $url -OutFile $gitZip -UseBasicParsing -ErrorAction Stop
+        Expand-Archive -Path $gitZip -DestinationPath $gitDir -Force -ErrorAction Stop
+        $gitCmd = Join-Path $gitDir "cmd\git.exe"
+        if (Test-Path $gitCmd) {
+            $env:Path = (Join-Path $gitDir "cmd") + ";" + $env:Path
+            if (Get-Command git -ErrorAction SilentlyContinue) { return $true }
+        }
+    } catch {
+        Write-Err "Nao foi possivel instalar Git automaticamente. Instale manualmente: https://git-scm.com"
+        return $false
+    }
+    return $false
+}
+
+function Install-PortableNode($WorkDir) {
+    Write-Host "    Instalando Node.js LTS (portatil zip)..."
+    $arch = if ([Environment]::Is64BitOperatingSystem) { "x64" } else { "x86" }
+    $nodeZip = Join-Path $WorkDir "node.zip"
+    $nodeDir = Join-Path $WorkDir "node"
+    $url = "https://nodejs.org/dist/v20.17.0/node-v20.17.0-win-$arch.zip"
+    try {
+        Invoke-WebRequest -Uri $url -OutFile $nodeZip -UseBasicParsing -ErrorAction Stop
+        if (-not (Test-Path $nodeDir)) { New-Item -ItemType Directory -Path $nodeDir -Force | Out-Null }
+        Expand-Archive -Path $nodeZip -DestinationPath $nodeDir -Force -ErrorAction Stop
+        $inner = Get-ChildItem -Path $nodeDir -Directory | Select-Object -First 1
+        if ($inner) {
+            $nodeBin = $inner.FullName
+            $env:Path = $nodeBin + ";" + $env:Path
+            if (Get-Command node -ErrorAction SilentlyContinue) {
+                return $true
+            }
+        }
+    } catch {
+        Write-Err "Nao foi possivel instalar Node automaticamente. Instale manualmente: https://nodejs.org"
+        return $false
+    }
+    return $false
+}
+
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 Set-Location $ScriptDir
 
@@ -53,16 +104,26 @@ Write-Host "======================================================" -ForegroundC
 Write-Host "  LefferzinBypass - Instalador Vencord" -ForegroundColor Cyan
 Write-Host "  (Build + Inject automatico)" -ForegroundColor Cyan
 Write-Host "======================================================" -ForegroundColor Cyan
+Write-Host "Pasta de trabalho: $ScriptDir" -ForegroundColor Gray
+Write-Host ""
 
-# 0) Pre-requisitos
+# 0) Pre-requisitos com auto-instalação portátil
+Write-Step "[Pre] Verificando pre-requisitos (Git / Node.js)..."
 if (-not (Get-Command git -ErrorAction SilentlyContinue)) {
-    Write-Err "Git nao encontrado. Instale o Git primeiro: https://git-scm.com"
-    pause; exit 1
+    if (-not (Install-PortableGit $ScriptDir)) {
+        pause; exit 1
+    }
 }
+Write-Host "  Git ........ $(git --version 2>$null)" -ForegroundColor Green
+
 if (-not (Get-Command node -ErrorAction SilentlyContinue)) {
-    Write-Err "Node.js nao encontrado. Instale o Node 18+: https://nodejs.org"
-    pause; exit 1
+    if (-not (Install-PortableNode $ScriptDir)) {
+        pause; exit 1
+    }
 }
+Write-Host "  Node.js .... $(node --version 2>$null)" -ForegroundColor Green
+Write-Host "  npm ........ $(npm --version 2>$null)" -ForegroundColor Green
+
 if (-not (Get-Command pnpm -ErrorAction SilentlyContinue)) {
     Write-Warn "pnpm nao encontrado. Instalando via corepack..."
     try {
@@ -74,6 +135,8 @@ if (-not (Get-Command pnpm -ErrorAction SilentlyContinue)) {
         pause; exit 1
     }
 }
+Write-Host "  pnpm ....... $(pnpm --version 2>$null)" -ForegroundColor Green
+Write-Ok
 
 # PASSO 0) Baixar plugin do GitHub se nao existir
 if (-not (Test-Path "manifest.json")) {
