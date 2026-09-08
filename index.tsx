@@ -22,7 +22,7 @@ import {
     type StreamObservation,
     type StreamObservationStatus,
 } from "./stability";
-import { startPresence, stopPresence } from "./presence";
+import { startPresence, stopPresence, updateRouteInfo } from "./presence";
 
 const Native = VencordNative?.pluginHelpers?.LefferzinBypass as PluginNative<typeof import("./native")> | undefined;
 
@@ -264,11 +264,15 @@ function VpnPanel() {
     useEffect(() => {
         if (!Native) return;
         if (status?.active === true) {
-            startPresence();
+            startPresence(status?.routeCountry, status?.routeCity, status?.pingMs);
         } else if (status?.active === false || status?.state === "inactive" || status?.state === "blocked_external" || status?.state === "recovery_required") {
             stopPresence();
         }
-    }, [status?.active, status?.state, Native]);
+    }, [status?.active, status?.state, Native, status?.routeCountry, status?.routeCity, status?.pingMs]);
+
+    useEffect(() => {
+        updateRouteInfo(status?.routeCountry ?? null, status?.routeCity ?? null, status?.pingMs ?? null);
+    }, [status?.routeCountry, status?.routeCity, status?.pingMs]);
 
     const login = async () => {
         if (!Native || busy || optimizing || starting || logoutBusy) return;
