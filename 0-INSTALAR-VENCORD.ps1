@@ -316,7 +316,7 @@ $injectSuccess = $false
 function Test-InjectOk($output) {
     if (
         ($output -match "Successfully (patched|installed)") -or
-        ($output -match "(?im)(?:^|\s)(?:✔\s*)?Success!?(?:\s|$)") -or
+        ($output -match '(?im)\bSuccess!?\b') -or
         ($output -match "(?im)successfully") -or
         ($output -match "already patched") -or
         ($output -match "Unpatching first.*Successfully patched") -or
