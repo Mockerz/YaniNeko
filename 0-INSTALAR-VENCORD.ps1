@@ -314,42 +314,61 @@ $discordStable = Join-Path $env:LOCALAPPDATA "Discord"
 $injectSuccess = $false
 
 function Test-InjectOk($output) {
-    if ($output -match "Successfully (patched|installed)" -or $output -match "already patched.*Unpatching first.*Successfully patched") {
+    if (
+        ($output -match "Successfully (patched|installed)") -or
+        ($output -match "already patched") -or
+        ($output -match "Unpatching first.*Successfully patched") -or
+        ($output -match "Vencord is installed") -or
+        ($output -match "Successfully unpatched.*Successfully patched")
+    ) {
         return $true
     }
     return $false
 }
 
+Write-Host "  - Tentativa 1: injector CLI (branch stable)"
 $r = Run-InDir $vencordDir "node" @($runInstaller, "--", "--install", "-branch", "stable") -CaptureOnly
-if (Test-InjectOk $r.Output) {
-    $injectSuccess = $true
-}
+Write-Host ($r.Output.Trim()) -ForegroundColor DarkGray
+if (Test-InjectOk $r.Output) { $injectSuccess = $true }
 
 if (-not $injectSuccess) {
-    Write-Warn "Inject automatico falhou. Tentando com caminho customizado..."
+    Write-Host ""
+    Write-Warn "Tentativa 1 falhou. Tentativa 2: injector CLI (caminho fixo Stable)"
     if (Test-Path $discordStable) {
         $r = Run-InDir $vencordDir "node" @($runInstaller, "--", "--install", "-location", $discordStable) -CaptureOnly
-        if (Test-InjectOk $r.Output) {
-            $injectSuccess = $true
-        }
-        if (-not $injectSuccess) {
-            Write-Warn "Inject com caminho fixo tambem falhou. Tentando abrir CLI..."
-            $installerCli = Join-Path $vencordDir "dist\Installer\VencordInstallerCli.exe"
-            if (Test-Path $installerCli) {
-                $out = & $installerCli --install -branch stable 2>&1 | Out-String
-                if (Test-InjectOk $out) {
-                    $injectSuccess = $true
-                }
-            }
-        }
+        Write-Host ($r.Output.Trim()) -ForegroundColor DarkGray
+        if (Test-InjectOk $r.Output) { $injectSuccess = $true }
     }
 }
 
 if (-not $injectSuccess) {
-    if (Test-Path (Join-Path $env:LOCALAPPDATA "Discord\app-*\_app.asar.unpacked")) {
-        Write-Warn "Parece que o Discord esta patchado, mas o injector reportou erro. Verifique manualmente."
+    Write-Host ""
+    Write-Warn "Tentativa 2 falhou. Tentativa 3: pnpm inject (oficial, abre menu/GUI)"
+    $r = Run-InDir $vencordDir "pnpm" @("inject") -CaptureOnly
+    Write-Host ($r.Output.Trim()) -ForegroundColor DarkGray
+    if (Test-InjectOk $r.Output) { $injectSuccess = $true }
+}
+
+if (-not $injectSuccess) {
+    $patched = $false
+    if (Test-Path $discordStable) {
+        $dirs = Get-ChildItem -Path $discordStable -Directory -Filter "app-*" -ErrorAction SilentlyContinue | Sort-Object LastWriteTime -Descending
+        foreach ($d in $dirs) {
+            $unpacked = Join-Path $d.FullName "_app.asar.unpacked"
+            if (Test-Path $unpacked) { $patched = $true; break }
+            $asar = Join-Path $d.FullName "app.asar"
+            if (Test-Path $asar) {
+                $f = Get-Item $asar
+                if ($f.Length -gt 200MB) { $patched = $true; break }
+            }
+        }
+    }
+    if ($patched) {
+        Write-Warn "Injector reportou erro, mas parece que o Discord ESTA patchado (app.asar grande/_app.asar.unpacked existe)."
     } else {
-        Write-Warn "Inject nao rodou automatico. Abra a pasta Vencord e rode pnpm inject manualmente."
+        Write-Warn "Inject automatico nao funcionou. Abra a pasta:  $vencordDir"
+        Write-Warn "  No terminal (barra de endereco -> cmd) digite:  pnpm inject"
+        Write-Warn "  E escolha Stable no menu."
     }
 }
 
