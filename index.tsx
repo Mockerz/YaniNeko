@@ -84,6 +84,27 @@ let lastSelectedStreamRegion: string | null = null;
 let presenceStatusTimer: ReturnType<typeof setInterval> | null = null;
 let routeCheckTimer: ReturnType<typeof setInterval> | null = null;
 let initialRouteCheckTimer: ReturnType<typeof setTimeout> | null = null;
+let lastVpnNotification: { state: string; active: boolean; routeId: string | null } | null = null;
+
+function notifyVpnStatus(status: Partial<PluginVpnStatus> | null): void {
+    if (!status || typeof status.state !== "string" || typeof status.active !== "boolean") return;
+    const routeId = typeof status.routeId === "string" ? status.routeId : null;
+    const previous = lastVpnNotification;
+    const changed = !previous || previous.state !== status.state || previous.active !== status.active || previous.routeId !== routeId;
+    if (!changed) return;
+    lastVpnNotification = { state: status.state, active: status.active, routeId };
+
+    const route = status.routeLabel || status.routeCity || status.routeCountry || status.routeId || "rota atual";
+    const toastType = (Toasts.Type as { WARNING?: unknown }).WARNING ?? Toasts.Type.MESSAGE;
+    if (status.active && (!previous?.active || previous.routeId !== routeId)) {
+        const ping = typeof status.pingMs === "number" ? ` (${Math.round(status.pingMs)} ms)` : "";
+        showToast(`VPN conectada pela ${route}${ping}.`, Toasts.Type.SUCCESS);
+    } else if (!status.active && previous?.active) {
+        showToast("VPN desconectada. O tráfego voltou para a rede normal.", toastType);
+    } else if (status.state === "blocked_external" || status.state === "recovery_required") {
+        showToast(`VPN não iniciou: ${status.message || status.externalReason || "é necessária uma recuperação"}.`, Toasts.Type.FAILURE);
+    }
+}
 
 async function checkRouteAutomatically(): Promise<void> {
     if (!Native) return;
@@ -94,6 +115,9 @@ async function checkRouteAutomatically(): Promise<void> {
             const load = typeof result.currentLoad === "number" ? ` (carga anterior: ${result.currentLoad}%)` : "";
             showToast(`Rota limpa ativada: ${selected}${load}. Discord continua conectado.`, Toasts.Type.SUCCESS);
             await refreshPresenceStatus();
+        } else if (result?.checked === true && typeof result.currentLoad === "number" && result.currentLoad > 65) {
+            const candidates = typeof result.pingCandidates === "number" ? ` Foram comparadas ${result.pingCandidates} rotas de menor carga.` : "";
+            showToast(`Rota atual acima de 65% (${Math.round(result.currentLoad)}%). Não foi possível trocar a rota.${candidates}`, (Toasts.Type as { WARNING?: unknown }).WARNING ?? Toasts.Type.MESSAGE);
         }
     } catch (error) {
         logger.error("Falha na verificação automática de rota", error);
@@ -118,6 +142,7 @@ async function refreshPresenceStatus(): Promise<void> {
     if (!Native) return;
     try {
         const status = await Native.getVpnStatus() as PluginVpnStatus;
+        notifyVpnStatus(status);
         if (status.active === true) {
             startPresence(status.routeId, status.routeCountry, status.routeCity, status.pingMs);
             updateRouteInfo(status.routeId, status.routeCountry, status.routeCity, status.pingMs);
@@ -292,6 +317,7 @@ function VpnPanel() {
         try {
             const [nextStatus, saved] = await Promise.all([Native.getVpnStatus(), Native.getProtonSettings()]);
             setStatus(nextStatus as PluginVpnStatus);
+            notifyVpnStatus(nextStatus as PluginVpnStatus);
             const savedRecord = saved as { protonUsername?: unknown; sessionUsername?: unknown };
             const savedUsername = typeof savedRecord.protonUsername === "string" && savedRecord.protonUsername
                 ? savedRecord.protonUsername
@@ -325,6 +351,7 @@ function VpnPanel() {
         if (!Native || busy || optimizing || starting || logoutBusy) return;
         setBusy(true);
         try {
+            showToast("Iniciando login na Proton VPN...", Toasts.Type.MESSAGE);
             const result = await Native.loginProton({ username, password, twoFactorCode });
             if (!result.success) throw new Error(result.error || result.message || "Login Proton recusado.");
             setPassword("");
@@ -355,6 +382,7 @@ function VpnPanel() {
         if (!Native || busy || optimizing || starting || logoutBusy || loadingRoutes || applyingRoute) return;
         setOptimizing(true);
         try {
+            showToast("Iniciando verificação das rotas Proton...", Toasts.Type.MESSAGE);
             const result = await Native.optimizeProtonRoute({
                 requestId: `plugin-${Date.now()}`,
                 speedTest: true,
@@ -376,6 +404,7 @@ function VpnPanel() {
         if (!Native || loadingRoutes || applyingRoute) return;
         setLoadingRoutes(true);
         try {
+            showToast("Consultando todas as rotas Proton...", Toasts.Type.MESSAGE);
             const result = await Native.listAvailableProtonServers() as { success?: boolean; servers?: ProtonRouteEntry[]; error?: string };
             if (!result?.success) throw new Error(result?.error || "Não conseguiu listar as rotas Proton.");
             const list = Array.isArray(result.servers) ? result.servers : [];
@@ -402,6 +431,7 @@ function VpnPanel() {
         setApplyingRoute(true);
         setBusy(true);
         try {
+            showToast(`Conectando à rota ${chosen.country} - ${chosen.city || chosen.name}...`, Toasts.Type.MESSAGE);
             const result = await Native.applySelectedProtonRoute({ country: chosen.country, serverId: chosen.name }) as { success?: boolean; error?: string; message?: string };
             if (result?.success === false) throw new Error(result.error || result.message || "Não conseguiu aplicar a rota selecionada.");
             showToast(`Rota ${chosen.country} - ${chosen.city || chosen.name} aplicada. Reiniciando tunel...`, Toasts.Type.SUCCESS);
@@ -419,6 +449,7 @@ function VpnPanel() {
         setStarting(true);
         setBusy(true);
         try {
+            showToast("Iniciando o túnel VPN...", Toasts.Type.MESSAGE);
             startPresence();
             const result = await Native.enable(false) as { success?: boolean; error?: string; message?: string; state?: string };
             if (result.success === false) {
@@ -442,6 +473,7 @@ function VpnPanel() {
         setStarting(true);
         setBusy(true);
         try {
+            showToast("Iniciando recuperação e conexão do túnel...", Toasts.Type.MESSAGE);
             const typed = Native as PluginNative<typeof import("./native")>;
             const result = await typed.recoverAndStart() as { success?: boolean; error?: string; message?: string };
             if (result.success === false) throw new Error(result.error || result.message || "Não foi possível recuperar o WireSock.");
@@ -462,6 +494,7 @@ function VpnPanel() {
         setLogoutBusy(true);
         setBusy(true);
         try {
+            showToast("Encerrando a VPN e desconectando da Proton...", Toasts.Type.MESSAGE);
             stopPresence();
             const typed = Native as PluginNative<typeof import("./native")>;
             const result = await typed.fullLogout();

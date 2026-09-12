@@ -50,6 +50,8 @@ const MIGRATION_FILE = "migration-v1.json";
 const PROFILE_FILE = "wireguard.conf";
 const SERVICE_CONFIG_FILE = "wiresock-discord.conf";
 const WATCHDOG_MS = 15_000;
+const AUTO_ROUTE_LOAD_LIMIT = 65;
+const AUTO_ROUTE_PING_CANDIDATES = 20;
 
 function errorMessage(error: unknown): string {
     return safeDiagnosticDetail(error, 600);
@@ -539,7 +541,7 @@ export class PluginVpnController {
         });
     }
 
-    public autoOptimizeRoute(): Promise<proton.ProtonOptimizationResult & { checked?: boolean; changed?: boolean; currentLoad?: number; selectedServer?: string }> {
+    public autoOptimizeRoute(): Promise<proton.ProtonOptimizationResult & { checked?: boolean; changed?: boolean; currentLoad?: number; selectedServer?: string; pingCandidates?: number }> {
         return (async () => {
             const status = this.getStatus();
             if (!status.active) return { success: false, checked: false, changed: false, error: "VPN inativa." };
@@ -559,14 +561,20 @@ export class PluginVpnController {
                 return Boolean(currentId && (id === currentId || name === currentId || id.includes(currentId) || currentId.includes(id)));
             });
             const currentLoad = current?.load;
-            if (typeof currentLoad !== "number" || currentLoad <= 80)
+            if (typeof currentLoad !== "number" || currentLoad <= AUTO_ROUTE_LOAD_LIMIT)
                 return { success: true, checked: true, changed: false, currentLoad, server: current?.name, load: currentLoad, pingMs: current?.pingMs };
-            const selected = listed.servers
-                .filter(server => server.id !== current?.id && typeof server.load === "number" && server.load <= 80)
+            // Primeiro consultamos a lista inteira. Só as 20 rotas com menor
+            // carga passam para a etapa de comparação de latência, evitando
+            // testar dezenas de servidores desnecessariamente.
+            const pingCandidates = listed.servers
+                .filter(server => server.id !== current?.id && typeof server.load === "number" && server.load <= AUTO_ROUTE_LOAD_LIMIT)
+                .sort((a, b) => (a.load ?? 100) - (b.load ?? 100) || a.country.localeCompare(b.country) || a.name.localeCompare(b.name))
+                .slice(0, AUTO_ROUTE_PING_CANDIDATES);
+            const selected = pingCandidates
                 .sort((a, b) => (a.pingMs ?? Number.POSITIVE_INFINITY) - (b.pingMs ?? Number.POSITIVE_INFINITY) || (a.load ?? 100) - (b.load ?? 100))[0];
-            if (!selected) return { success: false, checked: true, changed: false, currentLoad, error: "Todas as rotas disponíveis estão acima de 80% ou sem dados suficientes." };
+            if (!selected) return { success: false, checked: true, changed: false, currentLoad, pingCandidates: 0, error: `Todas as rotas disponíveis estão acima de ${AUTO_ROUTE_LOAD_LIMIT}% ou sem dados suficientes.` };
             const result = await this.optimizeProton({ serverId: selected.id, autoPing: true, speedTest: false, relaunch: false });
-            return { ...result, checked: true, changed: result.success === true, currentLoad, selectedServer: selected.name };
+            return { ...result, checked: true, changed: result.success === true, currentLoad, selectedServer: selected.name, pingCandidates: pingCandidates.length };
         })();
     }
 
