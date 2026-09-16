@@ -42,13 +42,13 @@ def fail(message: str):
     raise RuntimeError(message)
 
 
-def run(command: list[str], cwd: Path | None = None, check: bool = True) -> subprocess.CompletedProcess[str]:
+def run(command: list[str], cwd: Path | None = None, check: bool = True, env=None) -> subprocess.CompletedProcess[str]:
     log("$ " + " ".join(f'"{x}"' if " " in x else x for x in command))
     try:
         result = subprocess.run(
             command, cwd=str(cwd) if cwd else None, text=True,
             stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-            encoding="utf-8", errors="replace", shell=False,
+            encoding="utf-8", errors="replace", shell=False, env=env,
         )
     except FileNotFoundError:
         fail(f"Comando não encontrado: {command[0]}")
@@ -235,19 +235,59 @@ def build(vencord: Path, plugin_source: Path):
     log("OK: build validado e binário copiado")
 
 
+def find_discord() -> Path:
+    discord = Path(os.environ["LOCALAPPDATA"]) / "Discord"
+    if not any(discord.glob("app-*/Discord.exe")):
+        fail(f"Discord Stable não encontrado em {discord}. Instale e abra o Discord uma vez. "
+             "Execute este instalador na mesma conta do Windows que usa o Discord.")
+    return discord
+
+
+def verify_injection(vencord: Path, discord: Path):
+    # Confirma o destino real, não apenas uma mensagem de sucesso do injetor.
+    versions = [p for p in discord.glob("app-*")
+                if re.fullmatch(r"app-\d+(?:\.\d+)*", p.name) and (p / "Discord.exe").is_file()]
+    if not versions:
+        fail(f"Nenhuma versão do Discord encontrada em {discord}.")
+    latest = max(versions, key=lambda p: tuple(map(int, p.name[4:].split("."))))
+    patcher = (vencord / "dist/patcher.js").resolve()
+    for name in ("patcher.js", "preload.js", "renderer.js"):
+        file = vencord / "dist" / name
+        if not file.is_file() or not file.stat().st_size:
+            fail(f"Build incompleto: {file}")
+    if "LefferzinBypass" not in (vencord / "dist/renderer.js").read_text(encoding="utf-8", errors="replace"):
+        fail("O build instalado não contém LefferzinBypass.")
+    resources = latest / "resources"
+    archive = resources / "app.asar"
+    backup = resources / "_app.asar"
+    if not archive.is_file() or not backup.is_file() or not backup.stat().st_size:
+        fail(f"O patch do Discord não foi confirmado em {resources}.")
+    # O ASAR gerado pelo instalador contém require(<caminho JSON do patcher>).
+    with archive.open("rb") as stream:
+        loader = stream.read(1024 * 1024)
+    reference = json.dumps(str(patcher), ensure_ascii=False).encode("utf-8")
+    if b"require(" + reference + b")" not in loader:
+        fail(f"O Discord em {latest} não aponta para o build instalado: {patcher}")
+    log(f"OK: patch e plugin verificados em {latest}")
+
+
 def inject(vencord: Path):
     step("[7/8] Fechando Discord e instalando no Discord Stable")
-    for process in ("Discord", "Update"):
-        subprocess.run(["taskkill", "/F", "/IM", process + ".exe"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    discord = find_discord()
+    installer = vencord / "dist/Installer/VencordInstallerCli.exe"
+    download("https://github.com/Vencord/Installer/releases/latest/download/VencordInstallerCli.exe", installer)
+    with installer.open("rb") as stream:
+        if stream.read(2) != b"MZ":
+            fail("O download do injetor oficial não é um executável Windows.")
+    subprocess.run(["taskkill", "/F", "/IM", "Discord.exe"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     time.sleep(3)
-    installer = vencord / "scripts" / "runInstaller.mjs"
-    if not installer.is_file():
-        fail("Injetor oficial do Vencord não foi encontrado.")
-    result = run(["node", str(installer), "--", "--install", "-branch", "stable"], cwd=vencord, check=False)
+    env = os.environ.copy()
+    env.update(VENCORD_USER_DATA_DIR=str(vencord.resolve()), VENCORD_DEV_INSTALL="1")
+    result = run([str(installer), "-install", "-location", str(discord)], cwd=vencord, env=env)
     combined = result.stdout or ""
-    if result.returncode != 0 or not re.search(r"success|installed|patched|already", combined, re.I):
+    if re.search(r"\b(?:ERROR|FATAL|Failed)\b", combined, re.I) or not re.search(r"\bSuccessfully patched\b", combined, re.I):
         fail("A injeção não foi confirmada pelo instalador oficial.")
-    log("OK: injeção concluída")
+    verify_injection(vencord, discord)
 
 
 LOGGER = None
@@ -275,6 +315,7 @@ def main() -> int:
     log("=" * 54)
     log(f"Log: {log_path}")
     try:
+        find_discord()
         install_git(tools)
         install_node(tools)
         install_pnpm(tools)
@@ -298,5 +339,9 @@ def main() -> int:
 
 if __name__ == "__main__":
     code = main()
-    input("Pressione Enter para fechar...")
+    if sys.stdin is not None and sys.stdin.isatty():
+        try:
+            input("Pressione Enter para fechar...")
+        except (EOFError, KeyboardInterrupt):
+            pass
     raise SystemExit(code)
