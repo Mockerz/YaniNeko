@@ -4,6 +4,7 @@ Uso: py instalar_yanineko.py
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import re
@@ -21,6 +22,10 @@ REPO = "Mockerz/YaniNeko"
 PLUGIN_BRANCH = "main"
 VENCORD_REPO = "https://github.com/Vendicated/Vencord.git"
 PNPM_VERSION = "11.9.0"
+# v1.4.1 interrompe builds locais antes do patch e pode retornar Success.
+# Hash publicado em https://github.com/Vencord/Installer/releases/tag/v1.4.0
+INSTALLER_URL = "https://github.com/Vencord/Installer/releases/download/v1.4.0/VencordInstallerCli.exe"
+INSTALLER_SHA256 = "466d2a0be1f380ddffed052df3cc132125fa34dc1af29312e14f13f358c8d2a2"
 REQUIRED = [
     "manifest.json", "index.tsx", "native.ts", "presence.ts", "stability.ts",
     "vpn-controller.ts", "vpn-proton.ts", "vpn-types.ts", "vpn-windows.ts",
@@ -166,7 +171,12 @@ def install_pnpm(tools: Path):
     if not corepack:
         fail("Corepack não foi encontrado junto do Node.js.")
     os.environ["COREPACK_HOME"] = str(tools / "corepack")
-    run([corepack, "enable"])
+    os.environ["COREPACK_ENABLE_DOWNLOAD_PROMPT"] = "0"
+    # Node pode estar em Program Files; os shims devem pertencer ao usuário.
+    shims = tools / "corepack-bin"
+    shims.mkdir(parents=True, exist_ok=True)
+    run([corepack, "enable", "--install-directory", str(shims), "pnpm"])
+    prepend_path(shims)
     run([corepack, "prepare", f"pnpm@{PNPM_VERSION}", "--activate"])
     pnpm = shutil.which("pnpm")
     if not pnpm:
@@ -275,7 +285,10 @@ def inject(vencord: Path):
     step("[7/8] Fechando Discord e instalando no Discord Stable")
     discord = find_discord()
     installer = vencord / "dist/Installer/VencordInstallerCli.exe"
-    download("https://github.com/Vencord/Installer/releases/latest/download/VencordInstallerCli.exe", installer)
+    log("Injetor oficial fixado: v1.4.0 (compatível com build local)")
+    download(INSTALLER_URL, installer)
+    if hashlib.sha256(installer.read_bytes()).hexdigest() != INSTALLER_SHA256:
+        fail("O SHA256 do injetor não corresponde à versão oficial v1.4.0.")
     with installer.open("rb") as stream:
         if stream.read(2) != b"MZ":
             fail("O download do injetor oficial não é um executável Windows.")
