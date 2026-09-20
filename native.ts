@@ -584,40 +584,6 @@ try { process.on("SIGINT", () => shutdownSignal("SIGINT")); } catch {}
 try { process.on("SIGTERM", () => shutdownSignal("SIGTERM")); } catch {}
 try { process.on("SIGHUP", () => shutdownSignal("SIGHUP")); } catch {}
 
-function delay(ms: number) {
-    return new Promise<void>(resolve => setTimeout(resolve, ms));
-}
-
-async function tryAutoEnable(attempt: number, maxAttempts: number) {
-    if (!pluginEnabled()) return;
-    try {
-        const settings = controllerSettings();
-        const hasProfile = existsSync(join(VPN_DATA_DIR, "wireguard.conf"));
-        if (!settings.protonUsername && !hasProfile) {
-            log("info", "plugin ativado, mas sem login/perfil Proton; pulando auto-enable no boot");
-            return;
-        }
-        const result = await controller.enable(false);
-        if (result.success) {
-            log("info", `bypass ativado automaticamente no boot (tentativa ${attempt}/${maxAttempts})`, { estado: result.state });
-            return;
-        }
-        if (attempt < maxAttempts) {
-            log("warn", `bypass nao ativado no boot, tentando novamente em 6s`, { tentativa: attempt, estado: result.state, erro: result.error });
-            await delay(6000);
-            await tryAutoEnable(attempt + 1, maxAttempts);
-            return;
-        }
-        log("warn", `bypass nao ativado no boot apos ${maxAttempts} tentativas`, { estado: result.state, erro: result.error });
-    } catch (error) {
-        log("error", `excecao ao tentar ativar bypass no boot (tentativa ${attempt})`, { erro: safeDiagnosticDetail(error, 500) });
-        if (attempt < maxAttempts) {
-            await delay(6000);
-            await tryAutoEnable(attempt + 1, maxAttempts);
-        }
-    }
-}
-
 app.whenReady().then(async () => {
     log("info", `abrindo plugin VPN | ${process.platform} ${process.arch} | electron ${process.versions.electron}`);
     try {
@@ -625,5 +591,6 @@ app.whenReady().then(async () => {
     } catch (error) {
         log("error", "falha ao inicializar controlador VPN no boot", { erro: safeDiagnosticDetail(error, 500) });
     }
-    void tryAutoEnable(1, 2);
+    // A interface solicita a ativação depois de carregar o plugin. Não iniciar
+    // uma segunda sequência de enable/retry enquanto o Discord ainda abre.
 }).catch(error => log("error", "falha ao inicializar o controlador VPN", { erro: safeDiagnosticDetail(error, 500) }));

@@ -35,6 +35,11 @@ export interface StreamObservationDecision {
     key: string;
 }
 
+export function normalizeStreamClaim(value: unknown): boolean | null {
+    if (value === undefined) return null;
+    return value !== null && value !== false;
+}
+
 /**
  * Classifica apenas sinais já coletados pelo renderer. A chave não inclui o
  * timestamp, pois o watcher deve registrar mudanças de estado, não cada tick.
@@ -49,10 +54,11 @@ export function evaluateStreamObservation(sample: StreamObservation): StreamObse
         sample.selectedRegion,
     ].map(value => String(value ?? "null")).join("|");
 
-    if (sample.senderClaimed === false) return { status: "idle", key };
-    if (sample.senderClaimed === null || sample.nativeStreamCount === null) return { status: "unknown", key };
+    if (sample.nativeStreamCount === null) return { status: "unknown", key };
     if (sample.nativeStreamCount > 0) return { status: "native-connected", key };
-    return { status: "claimed-without-native", key };
+    if (sample.senderClaimed === true) return { status: "claimed-without-native", key };
+    if (sample.senderClaimed === false && sample.visibleStreamCount === 0) return { status: "idle", key };
+    return { status: "unknown", key };
 }
 
 export interface StreamClaimSample {
@@ -85,7 +91,8 @@ export function evaluateStreamClaim(
     }
 
     if (sample.senderClaimed === null || sample.nativeStreamCount === null) {
-        return { state: previous, status: "unknown", warn: false };
+        // Só uma sequência contínua de amostras conhecidas pode gerar alerta.
+        return { state: initialStreamClaimState(), status: "unknown", warn: false };
     }
 
     if (sample.nativeStreamCount > 0) {

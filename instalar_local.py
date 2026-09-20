@@ -23,6 +23,8 @@ REQUIRED = (
     "bin/win32-x64/proton-confgen.exe",
 )
 LOG = None
+INSTALLER_URL = "https://github.com/Vencord/Installer/releases/download/v1.4.0/VencordInstallerCli.exe"
+INSTALLER_SHA256 = "466d2a0be1f380ddffed052df3cc132125fa34dc1af29312e14f13f358c8d2a2"
 
 
 def log(message: str):
@@ -122,11 +124,11 @@ def ensure_dependencies(node: str, vencord: Path, root: Path, force: bool):
 
 def ensure_installer(vencord: Path) -> Path:
     target = contained(vencord / "dist/Installer/VencordInstallerCli.exe", vencord)
-    if not target.is_file():
+    if not target.is_file() or hashlib.sha256(target.read_bytes()).hexdigest() != INSTALLER_SHA256:
         target.parent.mkdir(parents=True, exist_ok=True)
         part = target.with_suffix(".download")
         request = urllib.request.Request(
-            "https://github.com/Vencord/Installer/releases/latest/download/VencordInstallerCli.exe",
+            INSTALLER_URL,
             headers={"User-Agent": "YaniNeko-local-installer"},
         )
         try:
@@ -135,6 +137,8 @@ def ensure_installer(vencord: Path) -> Path:
             with part.open("rb") as stream:
                 if stream.read(2) != b"MZ":
                     raise RuntimeError("Download do instalador oficial inválido.")
+            if hashlib.sha256(part.read_bytes()).hexdigest() != INSTALLER_SHA256:
+                raise RuntimeError("SHA256 do injetor oficial v1.4.0 inválido.")
             part.replace(target)
         finally:
             part.unlink(missing_ok=True)
@@ -223,7 +227,7 @@ def main(argv=None) -> int:
         env = os.environ.copy()
         env.update(VENCORD_USER_DATA_DIR=str(vencord), VENCORD_DEV_INSTALL="1")
         output = run([str(installer), "-install", "-branch", "stable"], vencord, env)
-        if re.search(r"\bERROR\b|\bFATAL\b", output, re.I) or not re.search(r"successfully|\bsuccess\b|\binstalled\b|\bpatched\b", output, re.I):
+        if re.search(r"\b(?:ERROR|FATAL|Failed)\b", output, re.I) or not re.search(r"\bSuccessfully patched\b", output, re.I):
             raise RuntimeError("O instalador oficial não confirmou a instalação. Consulte o log.")
         log("INSTALAÇÃO LOCAL CONCLUÍDA. Abra o Discord e ative LefferzinBypass em Plugins.")
         return 0

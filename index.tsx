@@ -18,6 +18,7 @@ import {
     evaluateStreamObservation,
     evaluateStreamClaim,
     initialStreamClaimState,
+    normalizeStreamClaim,
     type StreamClaimState,
     type StreamObservation,
     type StreamObservationStatus,
@@ -110,9 +111,11 @@ function notifyVpnStatus(status: Partial<PluginVpnStatus> | null): void {
 }
 
 async function checkRouteAutomatically(): Promise<void> {
-    if (!Native) return;
+    if (!Native || !pluginRunning) return;
+    const generation = pluginGeneration;
     try {
         const result = await Native.autoOptimizeRoute();
+        if (!pluginRunning || generation !== pluginGeneration) return;
         if (result?.changed === true) {
             const selected = result.selectedServer || result.server || "uma rota alternativa";
             const load = typeof result.currentLoad === "number" ? ` (carga anterior: ${result.currentLoad}%)` : "";
@@ -123,6 +126,7 @@ async function checkRouteAutomatically(): Promise<void> {
             showToast(`Rota atual acima de 70% (${Math.round(result.currentLoad)}%). Não foi possível trocar a rota.${candidates}`, (Toasts.Type as { WARNING?: unknown }).WARNING ?? Toasts.Type.MESSAGE);
         }
     } catch (error) {
+        if (!pluginRunning || generation !== pluginGeneration) return;
         logger.error("Falha na verificação automática de rota", error);
     }
 }
@@ -851,9 +855,7 @@ function pollStreamClaimOnce() {
     const visibleStreams = readStore(ApplicationStreamingStore, "getAllActiveStreams");
     const nativeKeys = readStore(StreamRTCConnectionStore, "getAllActiveStreamKeys");
 
-    const senderClaimed = !claimed.known || claimed.value === undefined
-        ? null
-        : claimed.value !== null;
+    const senderClaimed = claimed.known ? normalizeStreamClaim(claimed.value) : null;
     if (senderClaimed === false) lastSelectedStreamRegion = null;
     const now = Date.now();
     const observation: StreamObservation = {
@@ -1045,31 +1047,35 @@ export default definePlugin({
 
     start() {
         pluginRunning = true;
-        pluginGeneration++;
+        const generation = ++pluginGeneration;
+        const isCurrent = () => pluginRunning && generation === pluginGeneration;
         forceRegion();
         startStreamClaimWatch();
         if (!Native) return;
         void refreshPresenceStatus();
         presenceStatusTimer = setInterval(() => void refreshPresenceStatus(), 15_000);
-            Native.getProtonSettings().then(settings => {
+        void Native.getProtonSettings().then(settings => {
+            if (!isCurrent()) return;
             const hasUsername = typeof settings?.protonUsername === "string" && settings.protonUsername.trim() !== "";
             const hasSession = typeof (settings as { sessionUsername?: unknown })?.sessionUsername === "string"
                 && (settings as { sessionUsername: string }).sessionUsername.trim() !== "";
             if (!hasUsername && !hasSession) return;
-            startPresence();
             void Native.enable(false).then(result => {
+                if (!isCurrent()) return;
                 if (result?.success === true) {
-                    startPresence(settings.activatedRouteId ?? null, settings.routeCountry ?? null, settings.routeCity ?? null, settings.pingMs ?? null);
                     startAutomaticRouteMonitor();
-                    void refresh();
+                    void refreshPresenceStatus();
                 } else {
-                    void refresh();
+                    void refreshPresenceStatus();
                     showToast(`Lefferzin Bypass não conseguiu ativar a VPN: ${result?.error || result?.message || "rode o 0-LIMPAR-WIRESOCK.bat"}`, Toasts.Type.FAILURE);
                 }
             }).catch(error => {
+                if (!isCurrent()) return;
                 logger.error("Não conseguiu falar com o processo desktop", error);
             });
-        }).catch(() => {});
+        }).catch(error => {
+            if (isCurrent()) logger.error("Falha ao ler configurações na inicialização", error);
+        });
     },
 
     stop() {

@@ -95,6 +95,7 @@ export class PluginVpnController {
     private lastDiagnosticsAt = 0;
     private restarting = false;
     private initialized = false;
+    private initialization: Promise<void> | null = null;
     private optimization: { id: string; controller: AbortController } | null = null;
     private routeId: string | null = null;
     private routeCountry: string | null = null;
@@ -126,7 +127,11 @@ export class PluginVpnController {
         return true;
     }
 
-    public async initialize(): Promise<void> {
+    public initialize(): Promise<void> {
+        return this.initialization ??= this.initializeInternal();
+    }
+
+    private async initializeInternal(): Promise<void> {
         if (this.initialized || !isWindows()) return;
         this.initialized = true;
         try {
@@ -153,7 +158,7 @@ export class PluginVpnController {
             if (endpoint?.hostname && !this.routeId) this.routeId = endpoint.hostname.slice(0, 160);
             if (!this.routeLabel) this.routeLabel = this.buildRouteLabel();
             const owner = this.readOwner();
-            const inspection = windows.inspectWireSock(this.serviceConfigPath);
+            const inspection = await windows.inspectWireSockAsync(this.serviceConfigPath);
             if (!inspection.active) {
                 if (inspection.foreignRegisteredServices.length > 0) {
                     this.blockExternal(inspection.reason || "Um serviço WireSock externo está registrado.");
@@ -191,6 +196,7 @@ export class PluginVpnController {
     }
 
     public async getStatus(): Promise<VpnStatus> {
+        await this.initialize();
         if (!isSupportedWindowsArchitecture(process.platform, process.arch)) {
             return {
                 state: "blocked_external",
@@ -216,8 +222,10 @@ export class PluginVpnController {
         const previousState = this.state;
         const inspection = await windows.inspectWireSockAsync(this.serviceConfigPath);
         if (generation !== this.generation || previousState !== this.state) return this.getStatus();
-        if (this.state === "active" && (!inspection.active || !inspection.owned)) {
-            this.state = inspection.active || inspection.foreignRegisteredServices.length > 0 ? "blocked_external" : "recovery_required";
+        // Ausência transitória é confirmada pelo watchdog. O polling do painel
+        // não pode interromper esse processo na primeira amostra vazia.
+        if (this.state === "active" && ((inspection.active && !inspection.owned) || inspection.foreignRegisteredServices.length > 0)) {
+            this.state = "blocked_external";
             this.externalReason = inspection.reason;
             this.stopWatchdog();
         }
@@ -248,6 +256,7 @@ export class PluginVpnController {
 
     public enable(relaunch = true): Promise<VpnOperationResult> {
         return this.serial(async () => {
+            await this.initialize();
             const first = await this.startInternal(relaunch);
             if (first.success) return first;
             // Retry automático para racings de primeiro-login / sessão recém criada
@@ -285,7 +294,10 @@ export class PluginVpnController {
     }
 
     public shutdown(relaunch = true, forceNuclear = false): Promise<VpnOperationResult> {
-        return this.serial(() => this.stopInternal(relaunch, forceNuclear));
+        return this.serial(async () => {
+            await this.initialize();
+            return this.stopInternal(relaunch, forceNuclear);
+        });
     }
 
     /**
@@ -735,11 +747,11 @@ export class PluginVpnController {
             this.externalReason = "A VPN do plugin nesta versão está disponível somente no Windows x64.";
             return { success: false, state: this.state, error: this.externalReason };
         }
-        let existing = windows.inspectWireSock(this.serviceConfigPath);
+        let existing = await windows.inspectWireSockAsync(this.serviceConfigPath);
         if (existing.active && !existing.owned) {
             for (let attempt = 0; attempt < 3 && existing.active && !existing.owned; attempt++) {
                 await new Promise<void>(r => setTimeout(r, 600));
-                existing = windows.inspectWireSock(this.serviceConfigPath);
+                existing = await windows.inspectWireSockAsync(this.serviceConfigPath);
             }
         }
         if (existing.active && existing.owned) {
@@ -784,7 +796,7 @@ export class PluginVpnController {
             // wireguard.conf. Se duas instâncias chegarem aqui juntas, a
             // segunda não pode sobrescrever o perfil enquanto a primeira
             // ainda está iniciando o serviço.
-            owner = this.acquireOwnership();
+            owner = await this.acquireOwnership();
             const settings = this.settings();
             if (!settings.protonUsername) throw new Error("Faça login com sua conta Proton antes de ativar.");
             if (!fs.existsSync(this.profilePath)) {
@@ -968,6 +980,7 @@ export class PluginVpnController {
             this.watchdogBusy = true;
             const generation = this.generation;
             const watchdog = this.watchdog;
+            const isCurrent = () => this.state === "active" && generation === this.generation && watchdog === this.watchdog;
             try {
                 const owner = this.readOwner();
                 if (owner && owner.pid !== process.pid && !processAlive(owner.pid)) {
@@ -987,8 +1000,16 @@ export class PluginVpnController {
                     });
                     return;
                 }
-                const inspection = await windows.inspectWireSockAsync(this.serviceConfigPath);
-                if (this.state !== "active" || generation !== this.generation || watchdog !== this.watchdog) return;
+                let inspection = await windows.inspectWireSockAsync(this.serviceConfigPath);
+                if (!isCurrent()) return;
+                // Uma leitura vazia pode ser transitória. Erros de consulta abortam
+                // a confirmação e mantêm o estado até o próximo ciclo do watchdog.
+                for (let attempt = 0; !inspection.active && attempt < 5; attempt++) {
+                    await new Promise<void>(resolve => setTimeout(resolve, 1_000));
+                    if (!isCurrent()) return;
+                    inspection = await windows.inspectWireSockAsync(this.serviceConfigPath);
+                    if (!isCurrent()) return;
+                }
                 if (!inspection.active) {
                     this.state = "recovery_required";
                     this.setDiagnostic("wireguard", false, "serviço WireSock próprio desapareceu");
@@ -1038,10 +1059,10 @@ export class PluginVpnController {
         }
     }
 
-    private acquireOwnership(): VpnOwnerRecord {
+    private async acquireOwnership(): Promise<VpnOwnerRecord> {
+        const inspection = await windows.inspectWireSockAsync(this.serviceConfigPath);
         fs.mkdirSync(this.dataDir, { recursive: true });
         const existing = this.readOwner();
-        const inspection = windows.inspectWireSock(this.serviceConfigPath);
         if (inspection.active && !inspection.owned) throw new Error(inspection.reason || "WireSock externo está ativo.");
         if (existing?.pid === process.pid) {
             this.probePath = existing.probePath;

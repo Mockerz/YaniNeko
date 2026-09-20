@@ -1,4 +1,5 @@
 import json
+import os
 import subprocess
 import tempfile
 import unittest
@@ -10,6 +11,9 @@ import instalar_yanineko as installer
 
 class InstallerTests(unittest.TestCase):
     def setUp(self):
+        digest = patch.object(installer, 'INSTALLER_SHA256', installer.hashlib.sha256(b'MZ').hexdigest())
+        digest.start()
+        self.addCleanup(digest.stop)
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
         self.root = Path(self.temp.name)
@@ -37,6 +41,20 @@ class InstallerTests(unittest.TestCase):
 
     def test_valid_patch(self):
         installer.verify_injection(self.vencord, self.discord)
+
+    def test_pnpm_shims_use_user_directory(self):
+        tools = self.root / 'user tools'
+        corepack = r'C:\Program Files\nodejs\corepack.CMD'
+        pnpm = str(tools / 'corepack-bin/pnpm.CMD')
+        with patch.dict(os.environ), \
+             patch.object(installer.shutil, 'which', side_effect=[corepack, pnpm]), \
+             patch.object(installer, 'run', return_value=subprocess.CompletedProcess([], 0, '11.9.0')) as run:
+            installer.install_pnpm(tools)
+            self.assertEqual(run.call_args_list[0].args[0],
+                             [corepack, 'enable', '--install-directory', str(tools / 'corepack-bin'), 'pnpm'])
+            self.assertTrue((tools / 'corepack-bin').is_dir())
+            self.assertEqual(os.environ['PATH'].split(os.pathsep)[0], str(tools / 'corepack-bin'))
+            self.assertEqual(os.environ['COREPACK_HOME'], str(tools / 'corepack'))
 
     def test_new_discord_version_not_patched(self):
         self.make_version('1.0.10')
@@ -68,8 +86,18 @@ class InstallerTests(unittest.TestCase):
                     verify.assert_not_called()
 
     def fake_download(self, url, target):
+        self.assertEqual(url, 'https://github.com/Vencord/Installer/releases/download/v1.4.0/VencordInstallerCli.exe')
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_bytes(b'MZ')
+
+    def test_wrong_installer_hash_stops_before_closing_discord(self):
+        with patch.object(installer, 'find_discord', return_value=self.discord), \
+             patch.object(installer, 'download', side_effect=self.fake_download), \
+             patch.object(installer, 'INSTALLER_SHA256', '0' * 64), \
+             patch.object(installer.subprocess, 'run') as process:
+            with self.assertRaisesRegex(RuntimeError, 'SHA256'):
+                installer.inject(self.vencord)
+            process.assert_not_called()
 
     def test_direct_cli_uses_explicit_target_and_dev_build(self):
         with patch.object(installer, 'find_discord', return_value=self.discord), \

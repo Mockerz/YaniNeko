@@ -222,6 +222,14 @@ export async function inspectWireSockAsync(configPath?: string): Promise<WireSoc
                     const snapshot = JSON.parse(stdout) as WireSockSnapshot;
                     if (!Array.isArray(snapshot.services) || !Array.isArray(snapshot.processes))
                         throw new Error("Resposta inválida ao consultar WireSock.");
+                    // Estado transitório ou resposta parcial não comprovam queda.
+                    if (snapshot.services.some(row => !row || typeof row.Name !== "string"
+                        || !VPN_SERVICE_NAMES.includes(row.Name as typeof VPN_SERVICE_NAMES[number])
+                        || !["Running", "Stopped"].includes(row.State)
+                        || (row.PathName !== null && typeof row.PathName !== "string"))
+                        || snapshot.processes.some(row => !row || !Number.isInteger(row.ProcessId) || row.ProcessId <= 0
+                            || (row.CommandLine !== null && typeof row.CommandLine !== "string")))
+                        throw new Error("Estado do WireSock inconclusivo; aguardando nova consulta.");
                     resolve(snapshot);
                 } catch (parseError) { reject(parseError); }
             });
@@ -549,14 +557,14 @@ export async function startWireSockService(
     const validation = validateWireGuardProfile(rawConfig);
     if (!validation.valid) throw new Error(validation.error);
 
-    const current = inspectWireSock(configPath);
+    const current = await inspectWireSockAsync(configPath);
     if (current.active && !current.owned) throw new Error(current.reason || "WireSock externo já está ativo.");
     assertPluginServiceSlot(configPath);
     const executable = await ensureWireSockInstalled(log);
     // A instalação do SDK pode demorar e outro plugin/GUI pode registrar o
     // slot nesse intervalo. Reinspecione imediatamente antes de escrever e
     // iniciar o serviço; o script elevado também repete essa proteção.
-    const beforeStart = inspectWireSock(configPath);
+    const beforeStart = await inspectWireSockAsync(configPath);
     if (beforeStart.active && !beforeStart.owned) throw new Error(beforeStart.reason || "WireSock externo já está ativo.");
     const target = path.resolve(configPath);
     fs.mkdirSync(path.dirname(target), { recursive: true });
@@ -566,8 +574,10 @@ export async function startWireSockService(
     fs.renameSync(staging, target);
 
     try {
-        execFileSync("powershell.exe", elevatedPowerShellArgs(serviceScript(executable, target)), {
-            windowsHide: true, stdio: ["ignore", "pipe", "pipe"], timeout: 120_000,
+        await new Promise<void>((resolve, reject) => {
+            execFile("powershell.exe", elevatedPowerShellArgs(serviceScript(executable, target)), {
+                windowsHide: true, timeout: 120_000,
+            }, error => error ? reject(error) : resolve());
         });
     } catch (error) {
         try { fs.rmSync(staging, { force: true }); } catch {}
@@ -578,7 +588,13 @@ export async function startWireSockService(
     let inspection: WireSockInspection | null = null;
     for (let attempt = 0; attempt < 8; attempt++) {
         await wait(attempt < 3 ? 500 : 900);
-        inspection = inspectWireSock(target);
+        try {
+            inspection = await inspectWireSockAsync(target);
+        } catch (error) {
+            inspection = null;
+            log("warn", "consulta inconclusiva durante partida do WireSock", { tentativa: attempt + 1, erro: logError(error) });
+            continue;
+        }
         if (inspection.active && inspection.owned) break;
         log("warn", "aguardando WireSock confirmar perfil próprio após ativação", { tentativa: attempt + 1, active: inspection.active, owned: inspection.owned, motivo: inspection.reason });
     }
