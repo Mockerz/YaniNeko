@@ -116,7 +116,7 @@ test('observação respeita conexão nativa e não inventa inatividade', () => {
     assert.equal(stability.evaluateStreamObservation({ ...sample, nativeStreamCount: 0 }).status, 'idle');
 });
 
-function renderer() {
+function renderer(options = {}) {
     const settings = deferred();
     const enable = deferred();
     const route = deferred();
@@ -131,6 +131,12 @@ function renderer() {
         shutdown: async () => ({}), logFromRenderer: async () => {},
         autoOptimizeRoute: () => route.promise
     };
+    Object.assign(Native, options.native);
+    const hookState = [];
+    let hookIndex = 0;
+    const element = (type, props, ...children) => ({ type, props: { ...props, children } });
+    const Button = Object.assign(() => {}, { Looks: {} });
+    const TextInput = () => {};
     const plugin = load('index.tsx', {
         '@api/Commands': {},
         '@api/Settings': { definePluginSettings: () => ({ store: {} }) },
@@ -138,16 +144,78 @@ function renderer() {
         '@utils/Logger': { Logger: class { info() {} error(...args) { calls.errors.push(args); } } },
         '@utils/types': { __esModule: true, default: value => value, OptionType: {} },
         '@webpack': { findStoreLazy: name => name === 'RTCRegionStore' ? region : {} },
-        '@webpack/common': { Toasts: { Type: {} }, showToast: (...args) => calls.toasts.push(args) },
+        '@webpack/common': {
+            // Current Vencord has no Toasts.Type enum.
+            Toasts: {}, showToast: (...args) => {
+                if (options.toastFails) throw new Error('toast unavailable');
+                calls.toasts.push(args);
+            },
+            React: { createElement: element }, Button, TextInput, useEffect() {},
+            useState: initial => {
+                const index = hookIndex++;
+                if (!(index in hookState)) hookState[index] = initial;
+                return [hookState[index], value => { hookState[index] = value; }];
+            }
+        },
         './stability': stability,
         './presence': { startPresence: () => calls.presence++, stopPresence() {}, updateRouteInfo() {} }
     }, {
-        VencordNative: { pluginHelpers: { LefferzinBypass: Native } },
+        VencordNative: { pluginHelpers: { LefferzinBypass: options.noNative ? undefined : Native } },
         setInterval: timer, setTimeout: timer,
         clearInterval: id => timers.delete(id), clearTimeout: id => timers.delete(id)
     }).default;
-    return { plugin, settings, enable, route, calls, timers };
+    const renderPanel = () => {
+        hookIndex = 0;
+        const panel = plugin.settingsAboutComponent();
+        const tree = panel.type();
+        const nodes = [];
+        const visit = node => {
+            if (!node || typeof node !== 'object') return;
+            if (Array.isArray(node)) { node.forEach(visit); return; }
+            nodes.push(node);
+            visit(node.props?.children);
+        };
+        visit(tree);
+        return { nodes, button: label => nodes.find(n => n.type === Button && n.props.children.includes(label)),
+            inputs: nodes.filter(n => n.type === TextInput) };
+    };
+    return { plugin, settings, enable, route, calls, timers, renderPanel };
 }
+
+test('clique em Logar chama o backend sem Toasts.Type, mesmo se a notificação falhar', async () => {
+    for (const toastFails of [false, true]) {
+        let logins = 0;
+        const r = renderer({ toastFails, native: { loginProton: async () => {
+            logins++;
+            return { success: false, message: 'Login recusado para teste' };
+        } } });
+        r.renderPanel().inputs[0].props.onChange('test');
+        const button = r.renderPanel().button('Logar');
+        assert.equal(button.props.disabled, false);
+        button.props.onClick();
+        await flush();
+        assert.equal(logins, 1);
+        const panel = r.renderPanel();
+        assert.match(panel.nodes.find(n => n.props.role === 'status').props.children[0], /Login recusado/);
+        assert.equal(panel.button('Logar').props.disabled, false);
+    }
+});
+
+test('clique em Sair alcança fullLogout sem Toasts.Type', async () => {
+    let logouts = 0;
+    const r = renderer({ native: { fullLogout: async () => { logouts++; return { success: true }; } } });
+    r.settings.resolve({});
+    r.renderPanel().button('Sair').props.onClick();
+    await flush();
+    assert.equal(logouts, 1);
+    assert.ok(r.calls.toasts.some(([message, type]) => type === 'success' && message.includes('conta salva removida')));
+});
+
+test('componente nativo ausente gera aviso no painel ao clicar em Sair', () => {
+    const r = renderer({ noNative: true });
+    r.renderPanel().button('Sair').props.onClick();
+    assert.match(r.renderPanel().nodes.find(n => n.props.role === 'status').props.children[0], /componente desktop não carregou/);
+});
 
 test('desativar durante leitura de configurações impede ativação atrasada', async () => {
     const r = renderer();
