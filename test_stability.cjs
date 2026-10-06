@@ -26,6 +26,67 @@ const stability = load('stability.ts');
 const flush = async () => { for (let i = 0; i < 12; i++) await Promise.resolve(); };
 const deferred = () => { let resolve; const promise = new Promise(r => { resolve = r; }); return { promise, resolve }; };
 
+function logoutNative(shutdownSuccess, cleanupSuccess = true, settingsFail = false) {
+    const calls = [];
+    const plugins = { LefferzinBypass: { protonUsername: 'saved' }, 'Lefferzin Bypass': { protonUsername: 'legacy' } };
+    if (settingsFail) Object.defineProperty(plugins.LefferzinBypass, 'protonUsername', { set() { throw new Error('write failed'); } });
+    const native = load('native.ts', {
+        '@main/settings': { RendererSettings: { store: { plugins }, plain: { plugins } } },
+        electron: { app: { on() {}, whenReady: () => new Promise(() => {}) } },
+        fs: { mkdirSync() {}, existsSync: () => false, appendFileSync() {}, writeFileSync() {} },
+        './vpn-proton': {},
+        './vpn-controller': {
+            defaultPluginVpnDataDir: () => __dirname,
+            PluginVpnController: class {
+                async shutdown(relaunch, nuclear) { calls.push(['shutdown', relaunch, nuclear]); return { success: shutdownSuccess }; }
+                logoutProton() { calls.push(['cleanup']); return cleanupSuccess; }
+            }
+        }
+    }, { process: { ...process, on() {} } });
+    return { native, calls, plugins };
+}
+
+test('sair encerra a VPN antes de limpar a sessão e as duas configurações de conta', async () => {
+    const fixture = logoutNative(true);
+    assert.equal((await fixture.native.fullLogout()).success, true);
+    assert.deepEqual(fixture.calls, [['shutdown', false, false], ['cleanup']]);
+    for (const settings of Object.values(fixture.plugins)) assert.equal(settings.protonUsername, '');
+});
+
+test('sair preserva a conta quando não consegue encerrar a VPN', async () => {
+    const fixture = logoutNative(false);
+    assert.equal((await fixture.native.fullLogout()).success, false);
+    assert.deepEqual(fixture.calls, [['shutdown', false, false]]);
+    assert.equal(fixture.plugins.LefferzinBypass.protonUsername, 'saved');
+});
+
+test('sair não anuncia sucesso quando arquivos ou configurações não podem ser limpos', async () => {
+    for (const fixture of [logoutNative(true, false), logoutNative(true, true, true)]) {
+        const result = await fixture.native.fullLogout();
+        assert.equal(result.success, false);
+        assert.match(result.error, /limpeza.*incompleta/);
+    }
+});
+
+test('limpeza remove também o perfil do serviço e detecta arquivo bloqueado', () => {
+    for (const blocked of [false, true]) {
+        const config = path.join(__dirname, 'wiresock-discord.conf');
+        const files = new Set([config, path.join(__dirname, 'wireguard.conf')]);
+        const { PluginVpnController } = load('vpn-controller.ts', {
+            electron: { app: {} }, './vpn-windows': {},
+            './vpn-proton': { removeProtonSession: () => true, protonSessionFile: () => path.join(__dirname, 'session') },
+            fs: { existsSync: file => files.has(file), rmSync: file => {
+                if (blocked && file === config) throw new Error('locked');
+                files.delete(file);
+            } }
+        });
+        const controller = new PluginVpnController({ dataDir: __dirname, guiDataDir: __dirname,
+            readSettings: () => ({}), isEnabled: () => true, log() {} });
+        assert.equal(controller.logoutProton(), !blocked);
+        assert.equal(files.size, blocked ? 1 : 0);
+    }
+});
+
 test('false/null não indicam transmissão; undefined é desconhecido', () => {
     for (const value of [false, null]) assert.equal(stability.normalizeStreamClaim(value), false);
     assert.equal(stability.normalizeStreamClaim(undefined), null);

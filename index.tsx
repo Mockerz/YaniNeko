@@ -517,14 +517,16 @@ function VpnPanel() {
             const typed = Native as PluginNative<typeof import("./native")>;
             const result = await typed.fullLogout();
             if (!result.success) {
-                const msg = result.error || "Logout teve falhas parciais — tente rodar o 0-LIMPAR-WIRESOCK.bat.";
+                const msg = result.error || "Não foi possível concluir a limpeza da conta salva. Tente sair novamente.";
                 logger.warn("fullLogout retornou parcial:", result);
                 showToast(`Sair: ${msg}`, Toasts.Type.FAILURE);
             } else {
-                showToast("Deslogado — VPN encerrada, serviços WireSock removidos e conta Proton desconectada.", Toasts.Type.SUCCESS);
+                showToast("VPN encerrada e conta salva removida.", Toasts.Type.SUCCESS);
                 logger.info("fullLogout concluido:", result);
+                setUsername("");
+                setRoutes([]);
+                setSelectedRouteId(null);
             }
-            setUsername("");
             setPassword("");
             setTwoFactorCode("");
             await refresh();
@@ -607,7 +609,7 @@ function VpnPanel() {
                 <Paragraph style={{ margin: 0, fontWeight: 700, fontSize: "15px" }}>Conta Proton VPN</Paragraph>
 
                 <TextInput value={username} onChange={setUsername} placeholder="E-mail ou usuario Proton (ex: voce@proton.me)" disabled={disabledAll} />
-                <TextInput value={password} onChange={setPassword} placeholder="Senha OpenVPN/IKEv2 (NAO e a senha da conta - pegue em account.protonvpn.com/downloads)" type="password" disabled={disabledAll} />
+                <TextInput value={password} onChange={setPassword} placeholder="Senha" type="password" disabled={disabledAll} />
                 <TextInput value={twoFactorCode} onChange={setTwoFactorCode} placeholder="Codigo 2FA (deixa em branco se nao usar)" disabled={disabledAll} />
 
                 <div style={{ display: "flex", gap: "8px", flexWrap: "wrap", marginTop: "4px" }}>

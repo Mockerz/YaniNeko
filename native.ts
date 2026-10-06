@@ -161,13 +161,17 @@ export function logFromRenderer(_: IpcMainInvokeEvent, message: unknown): void {
     if (typeof message === "string" && message.trim()) log("info", message.slice(0, 2000));
 }
 
-function setStoredUsername(username: string): void {
+function setStoredUsername(username: string): boolean {
     try {
+        if (!RendererSettings.store.plugins) RendererSettings.store.plugins = {};
         const plugins = RendererSettings.store.plugins as Record<string, PluginSettingsRecord>;
-        const stored = plugins[PLUGIN_SETTINGS_KEY];
-        if (stored) stored.protonUsername = username;
+        const stored = plugins[PLUGIN_SETTINGS_KEY] ??= {};
+        stored.protonUsername = username;
+        if (!username && plugins[LEGACY_SETTINGS_KEY]) plugins[LEGACY_SETTINGS_KEY].protonUsername = "";
+        return true;
     } catch (error) {
         log("warn", "não consegui atualizar o usuário Proton nas configurações", { erro: error });
+        return false;
     }
 }
 
@@ -382,9 +386,9 @@ export async function fullLogout(_: IpcMainInvokeEvent): Promise<{
             log("error", "fullLogout: logoutProton lancou excecao", { erro: safeDiagnosticDetail(error) });
         }
 
-        setStoredUsername("");
+        const usernameRemoved = setStoredUsername("");
 
-        const success = wipedStopped && shutdownSuccess && protonSessionRemoved;
+        const success = wipedStopped && shutdownSuccess && protonSessionRemoved && usernameRemoved;
         quitting = false;
         return {
             success,
@@ -392,6 +396,7 @@ export async function fullLogout(_: IpcMainInvokeEvent): Promise<{
             servicesDeleted,
             shutdownSuccess,
             protonSessionRemoved,
+            error: success ? undefined : "A VPN foi encerrada, mas a limpeza da conta salva ficou incompleta. Tente sair novamente.",
         };
     } catch (error) {
         const detail = safeDiagnosticDetail(error);
