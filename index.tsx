@@ -12,7 +12,7 @@ import { Logger } from "@utils/Logger";
 import { useAwaiter } from "@utils/react";
 import definePlugin, { OptionType, PluginNative } from "@utils/types";
 import { findStoreLazy } from "@webpack";
-import { Button, Constants, MaskedLink, React, RestAPI, SearchableSelect, TextInput, showToast, Toasts, UserStore, useEffect, useState } from "@webpack/common";
+import { Button, Constants, MaskedLink, React, RestAPI, SearchableSelect, TextInput, showToast as discordShowToast, UserStore, useEffect, useState } from "@webpack/common";
 
 import {
     evaluateStreamObservation,
@@ -28,6 +28,14 @@ import { startPresence, stopPresence, updateRouteInfo } from "./presence";
 const Native = VencordNative?.pluginHelpers?.LefferzinBypass as PluginNative<typeof import("./native")> | undefined;
 
 const logger = new Logger("Lefferzin Bypass");
+
+function showToast(message: string, type: "message" | "success" | "failure" = "message"): void {
+    try {
+        discordShowToast(message, type);
+    } catch (error) {
+        logger.error("Falha ao exibir notificação", error);
+    }
+}
 
 interface RegionStore {
     getPreferredRegion(): string | null;
@@ -99,14 +107,14 @@ function notifyVpnStatus(status: Partial<PluginVpnStatus> | null): void {
     lastVpnNotification = { state: status.state, active: status.active, routeId };
 
     const route = status.routeLabel || status.routeCity || status.routeCountry || status.routeId || "rota atual";
-    const toastType = (Toasts.Type as { WARNING?: unknown }).WARNING ?? Toasts.Type.MESSAGE;
+    const toastType = "message";
     if (status.active && (!previous?.active || previous.routeId !== routeId)) {
         const ping = typeof status.pingMs === "number" ? ` (${Math.round(status.pingMs)} ms)` : "";
-        showToast(`VPN conectada pela ${route}${ping}.`, Toasts.Type.SUCCESS);
+        showToast(`VPN conectada pela ${route}${ping}.`, "success");
     } else if (!status.active && previous?.active) {
         showToast("VPN desconectada. O tráfego voltou para a rede normal.", toastType);
     } else if (status.state === "blocked_external" || status.state === "recovery_required") {
-        showToast(`VPN não iniciou: ${status.message || status.externalReason || "é necessária uma recuperação"}.`, Toasts.Type.FAILURE);
+        showToast(`VPN não iniciou: ${status.message || status.externalReason || "é necessária uma recuperação"}.`, "failure");
     }
 }
 
@@ -119,11 +127,11 @@ async function checkRouteAutomatically(): Promise<void> {
         if (result?.changed === true) {
             const selected = result.selectedServer || result.server || "uma rota alternativa";
             const load = typeof result.currentLoad === "number" ? ` (carga anterior: ${result.currentLoad}%)` : "";
-            showToast(`Rota limpa ativada: ${selected}${load}. Discord continua conectado.`, Toasts.Type.SUCCESS);
+            showToast(`Rota limpa ativada: ${selected}${load}. Discord continua conectado.`, "success");
             await refreshPresenceStatus();
         } else if (result?.checked === true && typeof result.currentLoad === "number" && result.currentLoad > 70) {
             const candidates = typeof result.pingCandidates === "number" ? ` Foram comparadas ${result.pingCandidates} rotas de menor carga.` : "";
-            showToast(`Rota atual acima de 70% (${Math.round(result.currentLoad)}%). Não foi possível trocar a rota.${candidates}`, (Toasts.Type as { WARNING?: unknown }).WARNING ?? Toasts.Type.MESSAGE);
+            showToast(`Rota atual acima de 70% (${Math.round(result.currentLoad)}%). Não foi possível trocar a rota.${candidates}`, "message");
         }
     } catch (error) {
         if (!pluginRunning || generation !== pluginGeneration) return;
@@ -323,6 +331,18 @@ function VpnPanel() {
     const [selectedRouteId, setSelectedRouteId] = useState<string | null>(null);
     const [loadingRoutes, setLoadingRoutes] = useState(false);
     const [applyingRoute, setApplyingRoute] = useState(false);
+    const [actionMessage, setActionMessage] = useState("");
+
+    const reportAction = (message: string, type: "message" | "success" | "failure" = "message") => {
+        setActionMessage(message);
+        showToast(message, type);
+    };
+
+    const requireNative = () => {
+        if (Native) return true;
+        reportAction("O componente desktop não carregou. Feche o Discord completamente e abra novamente. Se persistir, reinstale o plugin.", "failure");
+        return false;
+    };
 
     const refresh = async () => {
         if (!Native) return;
@@ -366,41 +386,41 @@ function VpnPanel() {
     }, [status?.routeId, status?.routeCountry, status?.routeCity, status?.pingMs]);
 
     const login = async () => {
-        if (!Native || busy || optimizing || starting || logoutBusy) return;
+        if (!requireNative() || !Native || busy || optimizing || starting || logoutBusy) return;
         setBusy(true);
         try {
-            showToast("Iniciando login na Proton VPN...", Toasts.Type.MESSAGE);
+            reportAction("Iniciando login na Proton VPN...", "message");
             const result = await Native.loginProton({ username, password, twoFactorCode });
             if (!result.success) throw new Error(result.error || result.message || "Login Proton recusado.");
             setPassword("");
             setTwoFactorCode("");
-            showToast("Logado na Proton. Subindo bypass automaticamente...", Toasts.Type.SUCCESS);
+            reportAction("Logado na Proton. Subindo bypass automaticamente...", "success");
             startPresence();
             await refresh();
             if (Native) {
                 const enabled = await Native.enable(false);
                 if (enabled.success === false) {
-                    showToast(
+                    reportAction(
                         `Logado, mas bypass ainda nao ativado: ${enabled.error || enabled.message || "clique em Start Bypass"}`,
-                        (Toasts.Type as { WARNING?: unknown }).WARNING ?? Toasts.Type.MESSAGE
+                        "message"
                     );
                 } else {
-                    showToast("Login OK + bypass ativado.", Toasts.Type.SUCCESS);
+                    reportAction("Login OK + bypass ativado.", "success");
                 }
                 await refresh();
             }
         } catch (error) {
-            showToast(`Login Proton: ${error instanceof Error ? error.message : String(error)}`, Toasts.Type.FAILURE);
+            reportAction(`Login Proton: ${error instanceof Error ? error.message : String(error)}`, "failure");
         } finally {
             setBusy(false);
         }
     };
 
     const optimize = async () => {
-        if (!Native || busy || optimizing || starting || logoutBusy || loadingRoutes || applyingRoute) return;
+        if (!requireNative() || !Native || busy || optimizing || starting || logoutBusy || loadingRoutes || applyingRoute) return;
         setOptimizing(true);
         try {
-            showToast("Iniciando verificação das rotas Proton...", Toasts.Type.MESSAGE);
+            reportAction("Iniciando verificação das rotas Proton...", "message");
             const result = await Native.optimizeProtonRoute({
                 requestId: `plugin-${Date.now()}`,
                 speedTest: true,
@@ -409,20 +429,20 @@ function VpnPanel() {
                 autoPing: settings.store.protonAutoPing
             });
             if (!result.success) throw new Error(result.error || "Não foi possível otimizar a rota Proton.");
-            showToast("Rota Proton otimizada. O Discord sera reiniciado para aplicar o tunel.", Toasts.Type.SUCCESS);
+            reportAction("Rota Proton otimizada. O Discord sera reiniciado para aplicar o tunel.", "success");
             await refresh();
         } catch (error) {
-            showToast(`Otimizacao Proton: ${error instanceof Error ? error.message : String(error)}`, Toasts.Type.FAILURE);
+            reportAction(`Otimizacao Proton: ${error instanceof Error ? error.message : String(error)}`, "failure");
         } finally {
             setOptimizing(false);
         }
     };
 
     const loadRoutes = async () => {
-        if (!Native || loadingRoutes || applyingRoute) return;
+        if (!requireNative() || !Native || loadingRoutes || applyingRoute) return;
         setLoadingRoutes(true);
         try {
-            showToast("Consultando todas as rotas Proton...", Toasts.Type.MESSAGE);
+            reportAction("Consultando todas as rotas Proton...", "message");
             const result = await Native.listAvailableProtonServers() as { success?: boolean; servers?: ProtonRouteEntry[]; error?: string };
             if (!result?.success) throw new Error(result?.error || "Não conseguiu listar as rotas Proton.");
             const list = Array.isArray(result.servers) ? result.servers : [];
@@ -431,31 +451,31 @@ function VpnPanel() {
                 const current = list.find(r => r.id.toLowerCase() === String(status.routeId).toLowerCase() || r.name.toLowerCase() === String(status.routeId).toLowerCase());
                 if (current) setSelectedRouteId(current.id);
             }
-            showToast(`Encontradas ${list.length} rotas Proton disponiveis.`, Toasts.Type.SUCCESS);
+            reportAction(`Encontradas ${list.length} rotas Proton disponiveis.`, "success");
         } catch (error) {
-            showToast(`Lista de rotas: ${error instanceof Error ? error.message : String(error)}`, Toasts.Type.FAILURE);
+            reportAction(`Lista de rotas: ${error instanceof Error ? error.message : String(error)}`, "failure");
         } finally {
             setLoadingRoutes(false);
         }
     };
 
     const applyRoute = async () => {
-        if (!Native || busy || optimizing || starting || logoutBusy || applyingRoute || !selectedRouteId) return;
+        if (!requireNative() || !Native || busy || optimizing || starting || logoutBusy || applyingRoute || !selectedRouteId) return;
         const chosen = routes.find(r => r.id === selectedRouteId);
         if (!chosen) {
-            showToast("Selecione uma rota da lista primeiro.", Toasts.Type.FAILURE);
+            reportAction("Selecione uma rota da lista primeiro.", "failure");
             return;
         }
         setApplyingRoute(true);
         setBusy(true);
         try {
-            showToast(`Conectando à rota ${chosen.country} - ${chosen.city || chosen.name}...`, Toasts.Type.MESSAGE);
+            reportAction(`Conectando à rota ${chosen.country} - ${chosen.city || chosen.name}...`, "message");
             const result = await Native.applySelectedProtonRoute({ country: chosen.country, serverId: chosen.name }) as { success?: boolean; error?: string; message?: string };
             if (result?.success === false) throw new Error(result.error || result.message || "Não conseguiu aplicar a rota selecionada.");
-            showToast(`Rota ${chosen.country} - ${chosen.city || chosen.name} aplicada. Reiniciando tunel...`, Toasts.Type.SUCCESS);
+            reportAction(`Rota ${chosen.country} - ${chosen.city || chosen.name} aplicada. Reiniciando tunel...`, "success");
             await refresh();
         } catch (error) {
-            showToast(`Aplicar rota: ${error instanceof Error ? error.message : String(error)}`, Toasts.Type.FAILURE);
+            reportAction(`Aplicar rota: ${error instanceof Error ? error.message : String(error)}`, "failure");
         } finally {
             setApplyingRoute(false);
             setBusy(false);
@@ -463,11 +483,11 @@ function VpnPanel() {
     };
 
     const startBypass = async () => {
-        if (!Native || busy || optimizing || starting || logoutBusy || loadingRoutes || applyingRoute) return;
+        if (!requireNative() || !Native || busy || optimizing || starting || logoutBusy || loadingRoutes || applyingRoute) return;
         setStarting(true);
         setBusy(true);
         try {
-            showToast("Iniciando o túnel VPN...", Toasts.Type.MESSAGE);
+            reportAction("Iniciando o túnel VPN...", "message");
             startPresence();
             const result = await Native.enable(false) as { success?: boolean; error?: string; message?: string; state?: string };
             if (result.success === false) {
@@ -476,10 +496,10 @@ function VpnPanel() {
                 }
                 throw new Error(result.error || result.message || "Não foi possível ativar o bypass.");
             }
-            showToast("Bypass ativado - VPN em tunel isolado.", Toasts.Type.SUCCESS);
+            reportAction("Bypass ativado - VPN em tunel isolado.", "success");
             await refresh();
         } catch (error) {
-            showToast(`Start Bypass: ${error instanceof Error ? error.message : String(error)}`, Toasts.Type.FAILURE);
+            reportAction(`Start Bypass: ${error instanceof Error ? error.message : String(error)}`, "failure");
         } finally {
             setStarting(false);
             setBusy(false);
@@ -487,20 +507,20 @@ function VpnPanel() {
     };
 
     const recoverAndStart = async () => {
-        if (!Native || busy || optimizing || starting || logoutBusy || loadingRoutes || applyingRoute) return;
+        if (!requireNative() || !Native || busy || optimizing || starting || logoutBusy || loadingRoutes || applyingRoute) return;
         setStarting(true);
         setBusy(true);
         try {
-            showToast("Iniciando recuperação e conexão do túnel...", Toasts.Type.MESSAGE);
+            reportAction("Iniciando recuperação e conexão do túnel...", "message");
             const typed = Native as PluginNative<typeof import("./native")>;
             const result = await typed.recoverAndStart() as { success?: boolean; error?: string; message?: string };
             if (result.success === false) throw new Error(result.error || result.message || "Não foi possível recuperar o WireSock.");
             startPresence();
-            showToast("WireSock recuperado e bypass ativado usando o perfil existente.", Toasts.Type.SUCCESS);
+            reportAction("WireSock recuperado e bypass ativado usando o perfil existente.", "success");
             await refresh();
         } catch (error) {
             stopPresence();
-            showToast(`Recuperar bypass: ${error instanceof Error ? error.message : String(error)}`, Toasts.Type.FAILURE);
+            reportAction(`Recuperar bypass: ${error instanceof Error ? error.message : String(error)}`, "failure");
         } finally {
             setStarting(false);
             setBusy(false);
@@ -508,20 +528,20 @@ function VpnPanel() {
     };
 
     const logout = async () => {
-        if (!Native || busy || optimizing || starting || logoutBusy || loadingRoutes || applyingRoute) return;
+        if (!requireNative() || !Native || busy || optimizing || starting || logoutBusy || loadingRoutes || applyingRoute) return;
         setLogoutBusy(true);
         setBusy(true);
         try {
-            showToast("Encerrando a VPN e desconectando da Proton...", Toasts.Type.MESSAGE);
+            reportAction("Encerrando a VPN e desconectando da Proton...", "message");
             stopPresence();
             const typed = Native as PluginNative<typeof import("./native")>;
             const result = await typed.fullLogout();
             if (!result.success) {
                 const msg = result.error || "Não foi possível concluir a limpeza da conta salva. Tente sair novamente.";
                 logger.warn("fullLogout retornou parcial:", result);
-                showToast(`Sair: ${msg}`, Toasts.Type.FAILURE);
+                reportAction(`Sair: ${msg}`, "failure");
             } else {
-                showToast("VPN encerrada e conta salva removida.", Toasts.Type.SUCCESS);
+                reportAction("VPN encerrada e conta salva removida.", "success");
                 logger.info("fullLogout concluido:", result);
                 setUsername("");
                 setRoutes([]);
@@ -531,7 +551,7 @@ function VpnPanel() {
             setTwoFactorCode("");
             await refresh();
         } catch (error) {
-            showToast(`Sair: ${error instanceof Error ? error.message : String(error)}`, Toasts.Type.FAILURE);
+            reportAction(`Sair: ${error instanceof Error ? error.message : String(error)}`, "failure");
         } finally {
             setLogoutBusy(false);
             setBusy(false);
@@ -598,6 +618,7 @@ function VpnPanel() {
             <Paragraph style={{ margin: 0, padding: "10px 12px", borderRadius: "8px", background: statusBg, color: statusColor, fontSize: "14px", fontWeight: 600 }}>
                 <strong>Status:</strong> {statusLabel}
             </Paragraph>
+            {actionMessage && <Paragraph role="status" aria-live="polite">{actionMessage}</Paragraph>}
 
             {Native && status?.state === "blocked_external" && (
                 <Paragraph style={{ margin: 0, padding: "8px 10px", borderRadius: "6px", background: "color-mix(in srgb, var(--info-danger-background) 40%, transparent)", color: "var(--text-danger)", fontSize: "13px" }}>
@@ -696,7 +717,7 @@ function forceRegion() {
     if (typeof store.getPreferredRegion !== "function"
         || typeof store.getPreferredRegions !== "function"
         || typeof store.shouldIncludePreferredRegion !== "function") {
-        showToast("Lefferzin Bypass: não conseguiu encontrar o selecionador de região do Discord — sua região de chamada não foi alterada.", Toasts.Type.FAILURE);
+        showToast("Lefferzin Bypass: não conseguiu encontrar o selecionador de região do Discord — sua região de chamada não foi alterada.", "failure");
         return;
     }
 
@@ -901,7 +922,7 @@ function pollStreamClaimOnce() {
         record("stream.guard | UI afirma transmissao, mas nenhuma conexao nativa apareceu em 32s; possivel erro 2001, sem acao automatica");
         showToast(
             "Lefferzin Bypass: Discord diz que você está transmitindo, mas nenhuma conexão Live apareceu em 32s (possível erro 2001). Pare a transmissão falsa, recarregue com Ctrl+R e tente de novo.",
-            Toasts.Type.FAILURE
+            "failure"
         );
     } else if (previousStatus.startsWith("failed") && decision.status === "healthy") {
         record("stream.guard | conexao nativa apareceu depois do aviso; estado recuperado");
@@ -1069,7 +1090,7 @@ export default definePlugin({
                     void refreshPresenceStatus();
                 } else {
                     void refreshPresenceStatus();
-                    showToast(`Lefferzin Bypass não conseguiu ativar a VPN: ${result?.error || result?.message || "rode o 0-LIMPAR-WIRESOCK.bat"}`, Toasts.Type.FAILURE);
+                    showToast(`Lefferzin Bypass não conseguiu ativar a VPN: ${result?.error || result?.message || "rode o 0-LIMPAR-WIRESOCK.bat"}`, "failure");
                 }
             }).catch(error => {
                 if (!isCurrent()) return;
