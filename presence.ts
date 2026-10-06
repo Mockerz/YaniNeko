@@ -7,7 +7,7 @@ import { ApplicationAssetUtils, FluxDispatcher } from "@webpack/common";
 const APPLICATION_ID = "1545534815468658789";
 const SOCKET_ID = "LefferzinBypass";
 const ACTIVITY_NAME = "Leffer (˶>⩊<˶)";
-const PRESENCE_PREFIX = "Fdc a putinha da Janja";
+const PRESENCE_PREFIX = "github.com/Mockerz/YaniNeko";
 
 // O nome deve ser exatamente a chave exibida em Developer Portal > Rich Presence > Art Assets.
 // O Discord transforma as chaves para minúsculas.
@@ -47,7 +47,7 @@ async function buildActivity(): Promise<Activity> {
     const start = discordPresenceStartedAt ?? Date.now();
     const largeImage = await resolveLargeImage();
 
-    let stateText = `${PRESENCE_PREFIX} - Conectado`;
+    let stateText = PRESENCE_PREFIX;
     const parts: string[] = [];
     if (currentServer) parts.push(currentServer.toUpperCase());
     if (currentCountry) parts.push(currentCountry.toUpperCase());

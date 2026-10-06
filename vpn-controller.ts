@@ -427,6 +427,9 @@ export class PluginVpnController {
     public logoutProton(): boolean {
         const removedSession = proton.removeProtonSession(this.dataDir);
         try {
+            if (fs.existsSync(this.serviceConfigPath)) fs.rmSync(this.serviceConfigPath, { force: true, maxRetries: 10 });
+        } catch { /* a verificação abaixo informa a falha */ }
+        try {
             if (fs.existsSync(this.profilePath)) fs.rmSync(this.profilePath, { force: true, maxRetries: 10 });
         } catch { /* ignora */ }
         try {
@@ -457,6 +460,7 @@ export class PluginVpnController {
         const residualFiles = [
             proton.protonSessionFile(this.dataDir),
             this.profilePath,
+            this.serviceConfigPath,
             path.join(this.dataDir, "wireguard-client.conf"),
             path.join(this.dataDir, "optimized-profile.conf"),
             path.join(this.dataDir, "optimization-marker.json"),
