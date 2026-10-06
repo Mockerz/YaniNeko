@@ -572,7 +572,8 @@ export async function generateOptimalProtonConfig(
         return { success: false, error: `Não foi possível filtrar as rotas Proton: ${logError(error)}` };
     }
     const args = ["-username", options.username.trim(), "-session-file", protonSessionFile(dataDir), "-output", staging, "-json", "-ipv6", "-exclude-countries", "BR"];
-    if (options.autoPing !== false) args.push("-auto-ping");
+    // Sem destino explícito, o confgen exige seleção global por ping.
+    if (options.autoPing !== false || (!options.country?.trim() && !selectedServer)) args.push("-auto-ping");
     if (options.speedTest) args.push("-speed-test", "-progress-json");
     if (options.freeOnly !== false) args.push("-free-only");
     if (options.country?.trim()) args.push("-countries", options.country.trim());
