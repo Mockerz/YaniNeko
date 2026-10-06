@@ -26,6 +26,22 @@ const stability = load('stability.ts');
 const flush = async () => { for (let i = 0; i < 12; i++) await Promise.resolve(); };
 const deferred = () => { let resolve; const promise = new Promise(r => { resolve = r; }); return { promise, resolve }; };
 
+test('geração sem destino usa seleção automática mesmo com autoPing desativado', async () => {
+    for (const [country, autoPing, expectedPing] of [['', false, true], ['   ', false, true], ['US', false, false], ['US', true, true]]) {
+        let args;
+        const proton = load('vpn-proton.ts', {
+            fs: { mkdirSync() {}, openSync: () => 1, writeFileSync() {}, closeSync() {}, rmSync() {},
+                existsSync: () => true, statSync: () => ({ isFile: () => true }) },
+            child_process: { spawn: (_exe, values) => { args = values; throw new Error('interceptado pelo teste'); } }
+        }, { __dirname });
+        await proton.generateOptimalProtonConfig(__dirname, { username: 'test', country, autoPing });
+        assert.ok(args, 'deve chegar ao gerador');
+        assert.equal(args.includes('-auto-ping'), expectedPing);
+        assert.equal(args.includes('-countries'), Boolean(country.trim()));
+        if (country.trim()) assert.equal(args[args.indexOf('-countries') + 1], country);
+    }
+});
+
 function logoutNative(shutdownSuccess, cleanupSuccess = true, settingsFail = false) {
     const calls = [];
     const plugins = { LefferzinBypass: { protonUsername: 'saved' }, 'Lefferzin Bypass': { protonUsername: 'legacy' } };
