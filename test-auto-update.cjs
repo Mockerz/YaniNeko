@@ -12,6 +12,16 @@ const sha = "a".repeat(40);
     try {
         for (const name of ["patcher.js", "renderer.js", "preload.js", "bin/win32-x64/proton-confgen.exe"]) write(path.join(root, "dist", name), "// LefferzinBypass baseline");
         updater.install(root, __dirname);
+        // Fast transitions remain separate, ordered events; history stays bounded.
+        for (const phase of ["checking", "available", "ready"]) updater.notify(root, phase);
+        const notificationFile = path.join(root, ".yanineko-updates/notifications.json");
+        let notifications = JSON.parse(fs.readFileSync(notificationFile));
+        assert.deepEqual(notifications.map(e => e.phase), ["checking", "available", "ready"]);
+        assert.equal(new Set(notifications.map(e => e.id)).size, 3);
+        for (let i = 0; i < 25; i++) updater.notify(root, "checking");
+        notifications = JSON.parse(fs.readFileSync(notificationFile));
+        assert.equal(notifications.length, 20);
+        assert.ok(notifications.every(e => Number.isFinite(e.at)));
         const baseline = state().active;
         assert.match(fs.readFileSync(path.join(root, "dist/patcher.js"), "utf8"), /yanineko-updater/);
         updater.validateRelease(updater.release(root, baseline));

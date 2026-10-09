@@ -27,6 +27,16 @@ function log(root, message) {
         fs.appendFileSync(file, `${new Date().toISOString()} ${message}\n`);
     } catch { /* Updating must never prevent Discord from opening. */ }
 }
+function notify(root, phase) {
+    // Bounded history keeps quick transitions visible to the renderer's polling.
+    try {
+        const file = path.join(home(root), "notifications.json");
+        const previous = read(file, []);
+        const events = Array.isArray(previous) ? previous.slice(-19) : [];
+        events.push({ id: crypto.randomUUID(), at: Date.now(), phase });
+        write(file, events);
+    } catch (error) { log(root, `Notification unavailable: ${error.message}`); }
+}
 function alive(pid) {
     if (!Number.isInteger(pid) || pid <= 0) return false;
     try { process.kill(pid, 0); return true; } catch (e) { return e.code === "EPERM"; }
@@ -218,10 +228,13 @@ async function check(root) {
         const checked = read(path.join(base, "checked.json"));
         if (checked && Date.now() - checked.at < INTERVAL - 5_000) return;
         write(path.join(base, "checked.json"), { at: Date.now() });
+        notify(root, "checking");
         const commit = JSON.parse(await download(`https://api.github.com/repos/${REPO}/commits/${BRANCH}`));
         const sha = commit.sha;
         if (typeof sha !== "string" || !/^[a-f0-9]{40}$/.test(sha)) throw new Error("Invalid commit response");
-        if (sha === state.active || sha === state.commit || sha === state.rejected) return;
+        if (sha === state.active || sha === state.commit) { notify(root, "current"); return; }
+        if (sha === state.rejected) { notify(root, "error"); return; }
+        notify(root, "available");
         log(root, `Preparing revision ${sha}`);
         work = inside(base, `work-${crypto.randomUUID()}`);
         const source = path.join(work, "plugin"); fs.mkdirSync(source, { recursive: true });
@@ -238,14 +251,15 @@ async function check(root) {
         if (fs.existsSync(target)) validateRelease(target);
         else fs.renameSync(dist, target);
         write(path.join(base, "pending.json"), { id: sha, preparedAt: Date.now() });
+        notify(root, "ready");
         log(root, `Revision ${sha} ready for next Discord launch`);
-    } catch (error) { log(root, `Update failed; current version preserved: ${error.message}`); }
+    } catch (error) { notify(root, "error"); log(root, `Update failed; current version preserved: ${error.message}`); }
     finally {
         if (work && fs.existsSync(work)) fs.rmSync(inside(base, path.basename(work)), { recursive: true, force: true });
         fs.rmSync(lock, { force: true });
     }
 }
-module.exports = { install, boot, choose, check, fetchSource, prepareBuild, compile, seal, validateRelease, inside, release, pluginFile };
+module.exports = { notify, install, boot, choose, check, fetchSource, prepareBuild, compile, seal, validateRelease, inside, release, pluginFile };
 if (require.main === module) {
     const [mode, root, source] = process.argv.slice(2);
     if (mode === "--install" && root && source) install(path.resolve(root), path.resolve(source));
