@@ -57,7 +57,7 @@ A opção **Otimizar rotas** compara servidores disponíveis e testa a conexão 
 
 Instale uma vez usando o **novo BypassDiscord.bat** ou **YaniNeko-Installer.exe** da release. Quem já usava uma versão antiga também precisa executar este instalador uma vez. Depois, o plugin verifica novos commits na `main` cerca de 30 segundos após abrir o Discord e a cada hora enquanto ele estiver aberto.
 
-O download fica preso a um único commit, os arquivos são conferidos pelos hashes do GitHub e o Vencord é compilado em uma pasta separada, usando as dependências da instalação. A versão pronta entra na próxima abertura completa do Discord. Fechar só a janela ou usar Ctrl+R não garante a troca: saia também pelo ícone ao lado do relógio. Nenhuma chamada é encerrada pelo atualizador.
+O download fica preso a um único commit, os arquivos são conferidos pelos hashes do GitHub e o Vencord é compilado em uma pasta separada, usando as dependências da instalação. Quando a atualização fica pronta, aparece um aviso e o Discord reinicia automaticamente após cerca de 10 segundos, inclusive durante chamadas e transmissões. O plugin encerra sua VPN antes de reiniciar. Se essa limpeza falhar, adia o reinício e tenta novamente após 1 minuto. Ctrl+R não é necessário.
 
 Se a internet, o GitHub ou a compilação falhar, a versão atual continua funcionando. Uma falha síncrona ao iniciar o novo build restaura a versão anterior para a abertura seguinte. Isso não detecta todos os erros que possam aparecer durante o uso. O atualizador próprio do Vencord fica desativado para não sobrescrever este build personalizado; atualizações da base do Vencord continuam exigindo o instalador.
 
