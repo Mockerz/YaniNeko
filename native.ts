@@ -32,6 +32,35 @@ const GUI_DATA_DIR = dirname(VPN_DATA_DIR);
 const LOG_FILE = join(VPN_DATA_DIR, "plugin-vpn.log");
 const ROUTE_INFO_FILE = join(VPN_DATA_DIR, "route-info.json");
 
+export function getAutoUpdateNotifications(_: IpcMainInvokeEvent, since: unknown) {
+    const events: { id: string; at: number; phase: string }[] = [];
+    if (typeof since !== "number" || !Number.isFinite(since)) return events;
+    // Works for both dist/ and the versioned .yanineko-updates/releases/<id>/.
+    let directory = __dirname;
+    for (let depth = 0; depth < 6; depth++) {
+        const base = join(directory, ".yanineko-updates");
+        if (existsSync(join(base, "active.json"))) {
+            try {
+                const file = join(base, "notifications.json");
+                if (statSync(file).size > 32 * 1024) return events;
+                const value: unknown = JSON.parse(readFileSync(file, "utf8"));
+                if (!Array.isArray(value)) return events;
+                for (const event of value.slice(-20)) {
+                    if (event && typeof event.id === "string" && event.id.length <= 64
+                        && typeof event.at === "number" && Number.isFinite(event.at) && event.at >= since
+                        && ["checking", "available", "ready", "current", "error"].includes(event.phase)) {
+                        events.push({ id: event.id, at: event.at, phase: event.phase });
+                    }
+                }
+            } catch { /* Missing/partially unavailable notifications are optional. */ }
+            return events;
+        }
+        const parent = dirname(directory);
+        if (parent === directory) break;
+        directory = parent;
+    }
+    return events;
+}
 function saveRouteInfo(routeId: string | null, pingMs: number | null): void {
     try {
         mkdirSync(dirname(ROUTE_INFO_FILE), { recursive: true });

@@ -37,6 +37,37 @@ function showToast(message: string, type: "message" | "success" | "failure" = "m
     }
 }
 
+let updateNotificationTimer: ReturnType<typeof setInterval> | null = null;
+
+function startUpdateNotifications(isCurrent: () => boolean): void {
+    if (updateNotificationTimer) clearInterval(updateNotificationTimer);
+    const since = Date.now() - 1_000;
+    const seen = new Set<string>();
+    let busy = false;
+    const poll = async () => {
+        if (busy || !isCurrent() || !Native) return;
+        busy = true;
+        try {
+            const events = await Native.getAutoUpdateNotifications(since);
+            if (!isCurrent()) return;
+            for (const event of events) {
+                if (seen.has(event.id)) continue;
+                seen.add(event.id);
+                if (seen.size > 100) seen.delete(seen.values().next().value!);
+                switch (event.phase) {
+                    case "checking": showToast("Lefferzin Bypass: verificando atualizações...", "message"); break;
+                    case "available": showToast("Nova atualização do Lefferzin Bypass encontrada! Preparando em segundo plano...", "message"); break;
+                    case "ready": showToast("Atualização pronta! Será aplicada quando você sair completamente e abrir o Discord novamente.", "success"); break;
+                    case "current": showToast("Lefferzin Bypass já está atualizado.", "success"); break;
+                    case "error": showToast("Não foi possível preparar a atualização. A versão atual foi mantida; confira o log do atualizador.", "failure"); break;
+                }
+            }
+        } catch { /* Older native builds may not expose notifications until restart. */ }
+        finally { busy = false; }
+    };
+    void poll();
+    updateNotificationTimer = setInterval(() => void poll(), 2_000);
+}
 interface RegionStore {
     getPreferredRegion(): string | null;
     getPreferredRegions(): string[] | null;
@@ -1075,6 +1106,7 @@ export default definePlugin({
         forceRegion();
         startStreamClaimWatch();
         if (!Native) return;
+        startUpdateNotifications(isCurrent);
         void refreshPresenceStatus();
         presenceStatusTimer = setInterval(() => void refreshPresenceStatus(), 15_000);
         void Native.getProtonSettings().then(settings => {
@@ -1104,6 +1136,8 @@ export default definePlugin({
     stop() {
         pluginRunning = false;
         pluginGeneration++;
+        if (updateNotificationTimer) clearInterval(updateNotificationTimer);
+        updateNotificationTimer = null;
         if (presenceStatusTimer) {
             clearInterval(presenceStatusTimer);
             presenceStatusTimer = null;
