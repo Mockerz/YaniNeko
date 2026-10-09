@@ -18,3 +18,9 @@ route-snapshot.json
 *.asar
 *.unpacked/
 __pycache__/
+
+.builddeps/
+.buildcache/
+*.spec
+
+/YaniNeko-Installer.exe

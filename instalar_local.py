@@ -19,7 +19,7 @@ from pathlib import Path
 SOURCE = Path(__file__).resolve().parent
 REQUIRED = (
     "manifest.json", "index.tsx", "native.ts", "presence.ts", "stability.ts",
-    "vpn-controller.ts", "vpn-proton.ts", "vpn-types.ts", "vpn-windows.ts",
+    "vpn-controller.ts", "vpn-proton.ts", "vpn-types.ts", "vpn-windows.ts", "auto-update.cjs",
     "bin/win32-x64/proton-confgen.exe",
 )
 LOG = None
@@ -194,7 +194,7 @@ def main(argv=None) -> int:
         log(f"Backup: {backup}")
         target = stage_plugin(SOURCE, vencord, backup, hashes)
         try:
-            run([node, "--require=./scripts/suppressExperimentalWarnings.js", "scripts/build/build.mjs"], vencord)
+            run([node, "--require=./scripts/suppressExperimentalWarnings.js", "scripts/build/build.mjs", "--disable-updater"], vencord)
             for filename in ("renderer.js", "patcher.js", "preload.js"):
                 artifact = dist / filename
                 if not artifact.is_file() or artifact.stat().st_size == 0:
@@ -229,6 +229,7 @@ def main(argv=None) -> int:
         output = run([str(installer), "-install", "-branch", "stable"], vencord, env)
         if re.search(r"\b(?:ERROR|FATAL|Failed)\b", output, re.I) or not re.search(r"\bSuccessfully patched\b", output, re.I):
             raise RuntimeError("O instalador oficial não confirmou a instalação. Consulte o log.")
+        run([node, str(SOURCE / "auto-update.cjs"), "--install", str(vencord), str(SOURCE)], vencord)
         log("INSTALAÇÃO LOCAL CONCLUÍDA. Abra o Discord e ative LefferzinBypass em Plugins.")
         return 0
     except (Exception, KeyboardInterrupt) as error:

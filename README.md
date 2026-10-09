@@ -52,3 +52,19 @@ A opção **Otimizar rotas** compara servidores disponíveis e testa a conexão 
 - **O login falhou?** Confira o usuário, a senha e o código 2FA, se houver.
 - **A conexão não está ativa?** Abra as configurações do plugin, confira a mensagem de status e clique em **Start Bypass**, se necessário.
 - **Onde ficam os logs da instalação?** Em `%LOCALAPPDATA%\LefferzinBypass\logs`.
+
+## Atualização automática (a partir da V1.1.0)
+
+Instale uma vez usando o **novo BypassDiscord.bat** ou **YaniNeko-Installer.exe** da release. Quem já usava uma versão antiga também precisa executar este instalador uma vez. Depois, o plugin verifica novos commits na `main` cerca de 30 segundos após abrir o Discord e a cada hora enquanto ele estiver aberto.
+
+O download fica preso a um único commit, os arquivos são conferidos pelos hashes do GitHub e o Vencord é compilado em uma pasta separada, usando as dependências da instalação. A versão pronta entra na próxima abertura completa do Discord. Fechar só a janela ou usar Ctrl+R não garante a troca: saia também pelo ícone ao lado do relógio. Nenhuma chamada é encerrada pelo atualizador.
+
+Se a internet, o GitHub ou a compilação falhar, a versão atual continua funcionando. Uma falha síncrona ao iniciar o novo build restaura a versão anterior para a abertura seguinte. Isso não detecta todos os erros que possam aparecer durante o uso. O atualizador próprio do Vencord fica desativado para não sobrescrever este build personalizado; atualizações da base do Vencord continuam exigindo o instalador.
+
+Para publicar uma alteração do plugin, basta fazer push na `main`. Não precisa criar uma release. Atualize `version` no `manifest.json` quando quiser mudar o número mostrado em **Bypass de Tela/Cam - V1.1.0**. O número exibido vem do build carregado; a detecção de atualizações usa o commit.
+
+O executável é distribuído pela release do GitHub e o BAT valida seu SHA256 antes de executá-lo. Se alterar `instalar_yanineko.py`, recompile `YaniNeko-Installer.exe`, publique-o na release e atualize a URL e o SHA256 em `BypassDiscord.bat` antes do push. O EXE gerado não entra no Git. Alterações apenas no plugin não exigem recompilar o instalador.
+
+Logs e estado: `%LOCALAPPDATA%\LefferzinBypass\Vencord\.yanineko-updates`. Conta Proton e configuração da VPN são preservadas. Se uma atualização do próprio Discord remover a injeção do Vencord, será necessário executar o instalador novamente.
+
+Validação de desenvolvimento: `node test-auto-update.cjs`. O teste `node validate-update-build.cjs` também compila uma cópia isolada usando o Vencord instalado no caminho padrão; não modifica o Discord em uso.
