@@ -3,6 +3,8 @@ import { Activity, ActivityAssets } from "@vencord/discord-types";
 import { ActivityType } from "@vencord/discord-types/enums";
 import { ApplicationAssetUtils, FluxDispatcher } from "@webpack/common";
 
+import { version } from "./manifest.json";
+
 // Este ID precisa ser o Application/Client ID da mesma aplicação onde a imagem foi enviada.
 const APPLICATION_ID = "1545534815468658789";
 const SOCKET_ID = "LefferzinBypass";
@@ -61,7 +63,7 @@ async function buildActivity(): Promise<Activity> {
         application_id: APPLICATION_ID,
         name: ACTIVITY_NAME,
         type: ActivityType.PLAYING,
-        details: "Bypass de Tela/Cam",
+        details: `Bypass de Tela/Cam - V${version}`,
         state: stateText,
         timestamps: { start },
         assets: {

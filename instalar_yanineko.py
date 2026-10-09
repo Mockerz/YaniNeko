@@ -28,7 +28,7 @@ INSTALLER_URL = "https://github.com/Vencord/Installer/releases/download/v1.4.0/V
 INSTALLER_SHA256 = "466d2a0be1f380ddffed052df3cc132125fa34dc1af29312e14f13f358c8d2a2"
 REQUIRED = [
     "manifest.json", "index.tsx", "native.ts", "presence.ts", "stability.ts",
-    "vpn-controller.ts", "vpn-proton.ts", "vpn-types.ts", "vpn-windows.ts",
+    "vpn-controller.ts", "vpn-proton.ts", "vpn-types.ts", "vpn-windows.ts", "auto-update.cjs",
 ]
 
 
@@ -188,7 +188,15 @@ def download_plugin(work: Path, script_dir: Path) -> Path:
     step("[4/8] Baixando o plugin YaniNeko")
     archive = work / "yanineko.zip"
     extracted = work / "yanineko"
-    download(f"https://github.com/{REPO}/archive/refs/heads/{PLUGIN_BRANCH}.zip", archive)
+    request = urllib.request.Request(
+        f"https://api.github.com/repos/{REPO}/commits/{PLUGIN_BRANCH}",
+        headers={"User-Agent": "YaniNeko-installer"},
+    )
+    with urllib.request.urlopen(request, timeout=60) as response:
+        sha = json.load(response).get("sha", "")
+    if not re.fullmatch(r"[a-f0-9]{40}", sha):
+        fail("Commit do plugin inválido.")
+    download(f"https://github.com/{REPO}/archive/{sha}.zip", archive)
     extract_zip(archive, extracted)
     roots = [p for p in extracted.iterdir() if p.is_dir() and p.name.startswith("YaniNeko-")]
     if not roots:
@@ -200,13 +208,10 @@ def download_plugin(work: Path, script_dir: Path) -> Path:
     binary = source / "bin" / "win32-x64" / "proton-confgen.exe"
     if not binary.is_file() or binary.stat().st_size < 4096:
         fail("proton-confgen.exe ausente ou inválido.")
-    for name in REQUIRED:
-        shutil.copy2(source / name, script_dir / name)
-    destination_bin = script_dir / "bin" / "win32-x64"
-    destination_bin.mkdir(parents=True, exist_ok=True)
-    shutil.copy2(binary, destination_bin / binary.name)
+
+    (source / ".source-commit.json").write_text(json.dumps({"sha": sha}), encoding="utf-8")
     log("OK: arquivos do plugin e binário validados")
-    return script_dir
+    return source
 
 
 def prepare_vencord(install_root: Path, plugin_source: Path):
@@ -222,9 +227,15 @@ def prepare_vencord(install_root: Path, plugin_source: Path):
     plugin = vencord / "src" / "userplugins" / "LefferzinBypass"
     shutil.rmtree(plugin, ignore_errors=True)
     (plugin / "bin" / "win32-x64").mkdir(parents=True, exist_ok=True)
-    for name in REQUIRED:
-        shutil.copy2(plugin_source / name, plugin / name)
-    shutil.copy2(plugin_source / "bin" / "win32-x64" / "proton-confgen.exe", plugin / "bin" / "win32-x64")
+    allowed = {".ts", ".tsx", ".js", ".mjs", ".cjs", ".json", ".css", ".svg", ".png", ".jpg", ".jpeg", ".gif", ".webp", ".ico", ".woff", ".woff2", ".ttf", ".wasm"}
+    for file in plugin_source.rglob("*"):
+        relative = file.relative_to(plugin_source)
+        if any(part.startswith(".") or part in {"node_modules", "build", "dist", "tests"} for part in relative.parts):
+            continue
+        if file.is_file() and (file.suffix in allowed or relative.as_posix() == "bin/win32-x64/proton-confgen.exe"):
+            target = plugin / relative
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(file, target)
     log("OK: Vencord e plugin preparados")
     return vencord
 
@@ -233,7 +244,7 @@ def build(vencord: Path, plugin_source: Path):
     step("[6/8] Instalando dependências e compilando")
     pnpm = shutil.which("pnpm") or "pnpm"
     run([pnpm, "install", "--frozen-lockfile"], cwd=vencord)
-    run([pnpm, "build"], cwd=vencord)
+    run([pnpm, "build", "--disable-updater"], cwd=vencord)
     renderer = vencord / "dist" / "renderer.js"
     if not renderer.is_file():
         fail("O build não gerou dist\\renderer.js.")
@@ -242,6 +253,9 @@ def build(vencord: Path, plugin_source: Path):
     dist_bin = vencord / "dist" / "desktop" / "bin" / "win32-x64"
     dist_bin.mkdir(parents=True, exist_ok=True)
     shutil.copy2(plugin_source / "bin" / "win32-x64" / "proton-confgen.exe", dist_bin)
+    direct_bin = vencord / "dist/bin/win32-x64"
+    direct_bin.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(plugin_source / "bin/win32-x64/proton-confgen.exe", direct_bin)
     log("OK: build validado e binário copiado")
 
 
@@ -336,6 +350,7 @@ def main() -> int:
         vencord = prepare_vencord(root, plugin_source)
         build(vencord, plugin_source)
         inject(vencord)
+        run([shutil.which("node"), str(plugin_source / "auto-update.cjs"), "--install", str(vencord), str(plugin_source)], cwd=vencord)
         step("[8/8] Finalização")
         log("INSTALAÇÃO CONCLUÍDA.")
         log("Abra o Discord e ative LefferzinBypass em Configurações > Plugins.")
@@ -351,6 +366,11 @@ def main() -> int:
 
 
 if __name__ == "__main__":
+    if "--self-test" in sys.argv:
+        assert "auto-update.cjs" in REQUIRED
+        assert re.fullmatch(r"[a-f0-9]{64}", INSTALLER_SHA256)
+        print("YaniNeko installer self-test OK: auto-update enabled")
+        raise SystemExit(0)
     code = main()
     if sys.stdin is not None and sys.stdin.isatty():
         try:

@@ -6,7 +6,7 @@ title YaniNeko - Baixar e instalar
 :: Discord e instalado por usuario. Nao trocar a conta via elevacao automatica.
 
 set "URL=https://github.com/Mockerz/YaniNeko/releases/download/4.0.0/YaniNeko-Installer.exe"
-set "OUT=%TEMP%\YaniNeko-Installer-4.0.0-%RANDOM%-%RANDOM%.exe"
+set "OUT=%TEMP%\YaniNeko-Installer-auto-%RANDOM%-%RANDOM%.exe"
 
 :: Permite testar a recompilacao antes de publicar a nova release.
 if exist "%~dp0YaniNeko-Installer.exe" (
@@ -15,7 +15,7 @@ if exist "%~dp0YaniNeko-Installer.exe" (
 )
 
 echo.
-echo Baixando YaniNeko Installer 4.0.0...
+echo Baixando YaniNeko Installer com atualizacao automatica...
 echo.
 
 powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "$ErrorActionPreference='Stop'; [Net.ServicePointManager]::SecurityProtocol=[Net.SecurityProtocolType]::Tls12; Invoke-WebRequest -Uri $env:URL -OutFile $env:OUT -UseBasicParsing -TimeoutSec 600"
@@ -47,6 +47,13 @@ for %%A in ("%OUT%") do if %%~zA LSS 102400 (
 echo.
 echo Download concluido.
 :instalar
+echo Validando o instalador...
+powershell.exe -NoProfile -Command "$actual=(Get-FileHash -LiteralPath $env:OUT -Algorithm SHA256).Hash; if ($actual -ne 'D05D2BB3DCB9FBFC305A4DE5DA282DBF3F0D2BDAE28F58DECDFFEE2B1CA4D9EF') { exit 1 }"
+if errorlevel 1 (
+    echo [ERRO] O instalador nao corresponde a esta versao do BAT. Baixe ambos novamente.
+    pause
+    exit /b 1
+)
 echo Executando instalador e aguardando o resultado...
 start "YaniNeko Installer" /wait "%OUT%"
 if errorlevel 1 (
