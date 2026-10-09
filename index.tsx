@@ -57,7 +57,7 @@ function startUpdateNotifications(isCurrent: () => boolean): void {
                 switch (event.phase) {
                     case "checking": showToast("Lefferzin Bypass: verificando atualizações...", "message"); break;
                     case "available": showToast("Nova atualização do Lefferzin Bypass encontrada! Preparando em segundo plano...", "message"); break;
-                    case "ready": showToast("Atualização pronta! Será aplicada quando você sair completamente e abrir o Discord novamente.", "success"); break;
+                    case "ready": showToast("Atualização pronta! O Discord vai reiniciar automaticamente em cerca de 10 segundos, inclusive durante chamadas.", "success"); break;
                     case "current": showToast("Lefferzin Bypass já está atualizado.", "success"); break;
                     case "error": showToast("Não foi possível preparar a atualização. A versão atual foi mantida; confira o log do atualizador.", "failure"); break;
                 }

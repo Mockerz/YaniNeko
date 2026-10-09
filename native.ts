@@ -567,6 +567,62 @@ export function applySelectedProtonRoute(event: IpcMainInvokeEvent, value: unkno
     }).catch(error => ({ success: false as const, error: safeDiagnosticDetail(error, 500) }));
 }
 
+function startAutomaticUpdateRestart(): void {
+    let pendingId: string | null = null;
+    let restartAt = 0;
+    let busy = false;
+    const readPending = (): string | null => {
+        let directory = __dirname;
+        for (let depth = 0; depth < 6; depth++) {
+            const base = join(directory, ".yanineko-updates");
+            if (existsSync(join(base, "active.json"))) {
+                try {
+                    const active = JSON.parse(readFileSync(join(base, "active.json"), "utf8"));
+                    const pending = JSON.parse(readFileSync(join(base, "pending.json"), "utf8"));
+                    if (active.pid !== process.pid || typeof pending.id !== "string"
+                        || !/^[a-f0-9]{40}$/.test(pending.id)
+                        || pending.id === active.active || pending.id === active.rejected) return null;
+                    // pending.json is published only after the complete build is validated.
+                    return pending.id;
+                } catch { return null; }
+            }
+            const parent = dirname(directory);
+            if (parent === directory) break;
+            directory = parent;
+        }
+        return null;
+    };
+    const timer = setInterval(async () => {
+        if (busy || quitting || controller.isRelaunching()) return;
+        const id = readPending();
+        if (!id) { pendingId = null; return; }
+        if (id !== pendingId) {
+            pendingId = id;
+            restartAt = Date.now() + 10_000;
+            log("info", "atualização pronta; reinício automático em 10 segundos", { commit: id });
+            return;
+        }
+        if (Date.now() < restartAt) return;
+        busy = true;
+        quitting = true;
+        try {
+            const result = await controller.shutdown(false, false);
+            if (!result.success && result.state !== "blocked_external") {
+                throw new Error(result.error || "Não foi possível encerrar a VPN para atualizar.");
+            }
+            // Recheck after waiting for any VPN operation already in progress.
+            if (readPending() !== id) { quitting = false; pendingId = null; return; }
+            log("info", "reiniciando Discord automaticamente para aplicar atualização", { commit: id });
+            app.relaunch();
+            app.exit(0);
+        } catch (error) {
+            quitting = false;
+            restartAt = Date.now() + 60_000;
+            log("error", "reinício para atualização adiado; nova tentativa em 1 minuto", { erro: safeDiagnosticDetail(error) });
+        } finally { busy = false; }
+    }, 2_000);
+    timer.unref?.();
+}
 app.on("before-quit", event => {
     if (controller.isRelaunching() || quitting) return;
     if (!controller.hasCleanupWork()) return;
@@ -625,6 +681,7 @@ app.whenReady().then(async () => {
     } catch (error) {
         log("error", "falha ao inicializar controlador VPN no boot", { erro: safeDiagnosticDetail(error, 500) });
     }
+    startAutomaticUpdateRestart();
     // A interface solicita a ativação depois de carregar o plugin. Não iniciar
     // uma segunda sequência de enable/retry enquanto o Discord ainda abre.
 }).catch(error => log("error", "falha ao inicializar o controlador VPN", { erro: safeDiagnosticDetail(error, 500) }));
