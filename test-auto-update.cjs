@@ -55,6 +55,30 @@ const sha = "a".repeat(40);
         await assert.rejects(updater.fetchSource(path.join(root, "bad-source"), sha, async url => url.includes("git/trees") ? get(url) : Buffer.from("tampered")), /hash mismatch/);
         assert.equal(updater.pluginFile("tests/file.ts"), false);
         assert.equal(updater.pluginFile("vpn-controller.ts"), true);
+        // A new Discord launch checks even when the previous launch checked recently.
+        const activePath = path.join(root, ".yanineko-updates/active.json");
+        write(activePath, { active: baseline, commit: sha, pid: process.pid });
+        const originalFetch = global.fetch;
+        let requests = 0;
+        global.fetch = async () => {
+            requests++;
+            return { ok: true, body: (async function* () { yield Buffer.from(JSON.stringify({ sha })); })() };
+        };
+        try {
+            await updater.check(root);
+            assert.equal(requests, 1);
+            await updater.check(root);
+            assert.equal(requests, 1, "same session must respect hourly cooldown");
+            const nextBootTime = new Date(Date.now() + 2000);
+            fs.utimesSync(activePath, nextBootTime, nextBootTime);
+            await updater.check(root);
+            assert.equal(requests, 2, "new launch must bypass previous session cooldown");
+            const checkedPath = path.join(root, ".yanineko-updates/checked.json");
+            const checked = JSON.parse(fs.readFileSync(checkedPath));
+            write(checkedPath, { ...checked, at: Date.now() - 60 * 60 * 1000 });
+            await updater.check(root);
+            assert.equal(requests, 3, "open Discord checks again after one hour");
+        } finally { global.fetch = originalFetch; }
         console.log("PASS: installation, deferred activation, preserved baseline, corrupt build rejection, rollback, path validation, pinned source hashes");
     } finally {
         const resolved = fs.realpathSync(root);

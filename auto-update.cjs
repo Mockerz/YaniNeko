@@ -225,9 +225,12 @@ async function check(root) {
     try {
         const state = read(path.join(base, "active.json"));
         if (!validId(state?.active) || read(path.join(base, "pending.json"))) return;
+        // active.json is rewritten by the bootstrap on each Discord launch.
+        // Scope the cooldown to that launch, including older installed bootstraps.
+        const session = `${state.pid}:${fs.statSync(path.join(base, "active.json")).mtimeMs}`;
         const checked = read(path.join(base, "checked.json"));
-        if (checked && Date.now() - checked.at < INTERVAL - 5_000) return;
-        write(path.join(base, "checked.json"), { at: Date.now() });
+        if (checked?.session === session && Date.now() - checked.at < INTERVAL - 5_000) return;
+        write(path.join(base, "checked.json"), { at: Date.now(), session });
         notify(root, "checking");
         const commit = JSON.parse(await download(`https://api.github.com/repos/${REPO}/commits/${BRANCH}`));
         const sha = commit.sha;
