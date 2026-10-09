@@ -91,6 +91,8 @@ export class PluginVpnController {
     private operationQueue: Promise<unknown> = Promise.resolve();
     private watchdog: ReturnType<typeof setInterval> | null = null;
     private watchdogBusy = false;
+    private recoveryTimer: ReturnType<typeof setTimeout> | null = null;
+    private recoveryEpoch = 0;
     private diagnosticsBusy = false;
     private lastDiagnosticsAt = 0;
     private restarting = false;
@@ -728,7 +730,7 @@ export class PluginVpnController {
             case "restart_pending": return "VPN preparada; reiniciando Discord";
             case "stopping": return "Restaurando rede normal";
             case "blocked_external": return this.externalReason || "WireSock externo está ativo";
-            case "recovery_required": return "A rede precisa de recuperação manual";
+            case "recovery_required": return this.recoveryTimer ? "VPN interrompida; recuperação automática agendada" : "A rede precisa de recuperação manual";
             default: return "VPN inativa";
         }
     }
@@ -1017,8 +1019,9 @@ export class PluginVpnController {
                 if (!inspection.active) {
                     this.state = "recovery_required";
                     this.setDiagnostic("wireguard", false, "serviço WireSock próprio desapareceu");
-                    this.options.log("error", "watchdog detectou que o WireSock próprio parou", { mode: "diagnostic-only" });
+                    this.options.log("warn", "watchdog detectou que o WireSock próprio parou; agendando recuperação automática");
                     this.stopWatchdog();
+                    this.scheduleRecovery(0);
                     return;
                 }
                 if (!inspection.owned) {
@@ -1038,6 +1041,48 @@ export class PluginVpnController {
     private stopWatchdog(): void {
         if (this.watchdog) clearInterval(this.watchdog);
         this.watchdog = null;
+        if (this.recoveryTimer) clearTimeout(this.recoveryTimer);
+        this.recoveryTimer = null;
+        this.recoveryEpoch++;
+    }
+
+    private scheduleRecovery(attempt: number): void {
+        if (this.recoveryTimer || !this.options.isEnabled() || this.restarting) return;
+        const epoch = this.recoveryEpoch;
+        const delay = Math.min(5_000 * 2 ** Math.min(attempt, 6), 5 * 60_000);
+        this.state = "recovery_required";
+        this.options.log("info", "recuperação automática agendada", { tentativa: attempt + 1, atrasoMs: delay });
+        this.recoveryTimer = setTimeout(() => {
+            // A fila impede recuperação simultânea com logout, otimização ou ativação.
+            void this.serial(async () => {
+                if (epoch !== this.recoveryEpoch) return;
+                this.recoveryTimer = null;
+                if (!this.options.isEnabled() || this.restarting || this.state !== "recovery_required") return;
+                try {
+                    const owner = this.readOwner();
+                    if (owner && owner.pid !== process.pid && processAlive(owner.pid)) {
+                        this.blockExternal("Outra instância do LefferzinBypass já controla esta sessão WireSock.");
+                        return;
+                    }
+                    const inspection = await windows.inspectWireSockAsync(this.serviceConfigPath);
+                    if ((inspection.active && !inspection.owned) || inspection.foreignRegisteredServices.length > 0) {
+                        this.blockExternal(inspection.reason || "WireSock externo encontrado durante a recuperação.");
+                        return;
+                    }
+                    // Limpa apenas a sessão própria, preservando conta e perfil Proton.
+                    const stopped = await this.stopInternal(false);
+                    const result = stopped.success ? await this.startInternal(false) : stopped;
+                    this.options.log(result.success ? "info" : "warn", "recuperação automática concluída", {
+                        tentativa: attempt + 1, sucesso: result.success, erro: result.error,
+                    });
+                    if (result.success || result.state === "blocked_external") return;
+                } catch (error) {
+                    this.options.log("warn", "recuperação automática falhou", { erro: errorMessage(error) });
+                }
+                this.scheduleRecovery(attempt + 1);
+            }).catch(error => this.options.log("error", "falha na fila de recuperação automática", { erro: errorMessage(error) }));
+        }, delay);
+        this.recoveryTimer.unref?.();
     }
 
     private requestRelaunch(): boolean {

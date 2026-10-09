@@ -581,7 +581,7 @@ function VpnPanel() {
     } else if (status?.state === "recovery_required") {
         statusColor = "var(--text-warning)";
         statusBg = "color-mix(in srgb, var(--info-warning-foreground) 18%, var(--background-secondary))";
-        statusLabel = "Recuperacao necessaria";
+        statusLabel = status.message || "Recuperacao necessaria";
     } else {
         const hasConfig = Boolean(status?.profilePath) || Boolean(status?.configPath);
         const hasUser = (settings.store.protonUsername as unknown as string || "").trim() !== "";
