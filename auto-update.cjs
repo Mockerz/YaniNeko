@@ -6,7 +6,7 @@ const crypto = require("node:crypto");
 const { spawn, spawnSync } = require("node:child_process");
 const REPO = "Mockerz/YaniNeko";
 const BRANCH = "main";
-const INTERVAL = 60 * 60 * 1000;
+const INTERVAL = 3 * 60 * 60 * 1000;
 const REQUIRED = ["manifest.json", "index.tsx", "native.ts", "presence.ts", "stability.ts", "vpn-controller.ts", "vpn-proton.ts", "vpn-types.ts", "vpn-windows.ts", "bin/win32-x64/proton-confgen.exe"];
 const ARTIFACTS = ["patcher.js", "preload.js", "renderer.js", "bin/win32-x64/proton-confgen.exe"];
 const validId = id => typeof id === "string" && /^(?:[a-f0-9]{40}|local-[a-f0-9]{32})$/.test(id);

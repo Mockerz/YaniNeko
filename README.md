@@ -55,7 +55,7 @@ A opção **Otimizar rotas** compara servidores disponíveis e testa a conexão 
 
 ## Atualização automática (a partir da V1.1.0)
 
-Instale uma vez usando o **novo BypassDiscord.bat** ou **YaniNeko-Installer.exe** da release. Quem já usava uma versão antiga também precisa executar este instalador uma vez. Depois, o plugin verifica novos commits na `main` cerca de 30 segundos após abrir o Discord e a cada hora enquanto ele estiver aberto.
+Instale uma vez usando o **novo BypassDiscord.bat** ou **YaniNeko-Installer.exe** da release. Quem já usava uma versão antiga também precisa executar este instalador uma vez. Depois, o plugin verifica novos commits na `main` cerca de 30 segundos após abrir o Discord e a cada 3 horas enquanto ele estiver aberto.
 
 O download fica preso a um único commit, os arquivos são conferidos pelos hashes do GitHub e o Vencord é compilado em uma pasta separada, usando as dependências da instalação. Quando a atualização fica pronta, aparece um aviso e o Discord reinicia automaticamente após cerca de 10 segundos, inclusive durante chamadas e transmissões. O plugin encerra sua VPN antes de reiniciar. Se essa limpeza falhar, adia o reinício e tenta novamente após 1 minuto. Ctrl+R não é necessário.
 
