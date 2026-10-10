@@ -68,7 +68,7 @@ const sha = "a".repeat(40);
             await updater.check(root);
             assert.equal(requests, 1);
             await updater.check(root);
-            assert.equal(requests, 1, "same session must respect hourly cooldown");
+            assert.equal(requests, 1, "same session must respect three-hour cooldown");
             const nextBootTime = new Date(Date.now() + 2000);
             fs.utimesSync(activePath, nextBootTime, nextBootTime);
             await updater.check(root);
@@ -77,7 +77,10 @@ const sha = "a".repeat(40);
             const checked = JSON.parse(fs.readFileSync(checkedPath));
             write(checkedPath, { ...checked, at: Date.now() - 60 * 60 * 1000 });
             await updater.check(root);
-            assert.equal(requests, 3, "open Discord checks again after one hour");
+            assert.equal(requests, 2, "one hour must not trigger another check");
+            write(checkedPath, { ...checked, at: Date.now() - 3 * 60 * 60 * 1000 });
+            await updater.check(root);
+            assert.equal(requests, 3, "open Discord checks again after three hours");
         } finally { global.fetch = originalFetch; }
         console.log("PASS: installation, deferred activation, preserved baseline, corrupt build rejection, rollback, path validation, pinned source hashes");
     } finally {
