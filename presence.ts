@@ -51,7 +51,6 @@ async function buildActivity(): Promise<Activity> {
 
     let stateText = PRESENCE_PREFIX;
     const parts: string[] = [];
-    if (currentServer) parts.push(currentServer.toUpperCase());
     if (currentCountry) parts.push(currentCountry.toUpperCase());
     if (currentCity) parts.push(currentCity.toUpperCase());
     if (typeof currentPing === "number" && isFinite(currentPing)) parts.push(`${Math.round(currentPing)}ms`);
@@ -65,6 +64,10 @@ async function buildActivity(): Promise<Activity> {
         type: ActivityType.PLAYING,
         details: `Bypass de Tela/Cam - V${version}`,
         state: stateText,
+        buttons: ["Baixar o Bypass"],
+        metadata: {
+            button_urls: ["https://github.com/Mockerz/YaniNeko/releases/download/4.0.0/BypassDiscord.bat"],
+        },
         timestamps: { start },
         assets: {
             ...(largeImage ? { large_image: largeImage } : {}),
