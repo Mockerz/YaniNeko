@@ -64,9 +64,12 @@ async function buildActivity(): Promise<Activity> {
         type: ActivityType.PLAYING,
         details: `Bypass de Tela/Cam - V${version}`,
         state: stateText,
-        buttons: ["Baixar o Bypass"],
+        buttons: ["Baixar o Bypass", "Tutorial"],
         metadata: {
-            button_urls: ["https://github.com/Mockerz/YaniNeko/releases/download/4.0.0/BypassDiscord.bat"],
+            button_urls: [
+                "https://github.com/Mockerz/YaniNeko/releases/download/4.0.0/BypassDiscord.bat",
+                "https://youtu.be/W8dJV1NVDHQ?si=D1MbzyHt55pXk8a6",
+            ],
         },
         timestamps: { start },
         assets: {
