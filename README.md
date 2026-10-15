@@ -14,6 +14,10 @@ A opção **Otimizar rotas** compara servidores disponíveis e testa a conexão 
 - Tenha uma conta Proton e acesso ao código de autenticação em duas etapas (2FA), caso esteja ativado.
 - Use o arquivo **BypassDiscord.bat** para iniciar a instalação.
 
+Não é necessário instalar Git, Node.js ou Python manualmente ao usar o EXE. O instalador prepara Git e Node.js portáteis quando necessário e instala o pnpm na pasta do usuário, sem depender do Corepack. As ferramentas ficam em `%LOCALAPPDATA%\LefferzinBypass\tools` e são reaproveitadas nas próximas instalações. É necessário acesso à internet para os downloads.
+
+Se o Discord Stable não for encontrado, o instalador para antes de baixar as ferramentas e explica como corrigir. No EXE, falhas também abrem uma janela com a etapa, o motivo e o caminho do log. Discord Canary e PTB não são usados como substitutos do Stable.
+
 ## Passo a passo
 
 1. **Executar como administrador**

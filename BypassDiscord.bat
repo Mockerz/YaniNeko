@@ -48,7 +48,7 @@ echo.
 echo Download concluido.
 :instalar
 echo Validando o instalador...
-powershell.exe -NoProfile -Command "$actual=(Get-FileHash -LiteralPath $env:OUT -Algorithm SHA256).Hash; if ($actual -ne 'D05D2BB3DCB9FBFC305A4DE5DA282DBF3F0D2BDAE28F58DECDFFEE2B1CA4D9EF') { exit 1 }"
+powershell.exe -NoProfile -Command "$actual=(Get-FileHash -LiteralPath $env:OUT -Algorithm SHA256).Hash; if ($actual -ne '66E92CE7ED982DCC05293DDE5D6F5F12AFD63230E088C83CB174457A8D971506') { exit 1 }"
 if errorlevel 1 (
     echo [ERRO] O instalador nao corresponde a esta versao do BAT. Baixe ambos novamente.
     pause

@@ -22,6 +22,8 @@ REPO = "Mockerz/YaniNeko"
 PLUGIN_BRANCH = "main"
 VENCORD_REPO = "https://github.com/Vendicated/Vencord.git"
 PNPM_VERSION = "11.9.0"
+PNPM_COMMAND: list[str] = []
+CURRENT_STEP = "Verificando requisitos"
 # v1.4.1 interrompe builds locais antes do patch e pode retornar Success.
 # Hash publicado em https://github.com/Vencord/Installer/releases/tag/v1.4.0
 INSTALLER_URL = "https://github.com/Vencord/Installer/releases/download/v1.4.0/VencordInstallerCli.exe"
@@ -40,11 +42,29 @@ def log(message: str = ""):
 
 
 def step(message: str):
+    global CURRENT_STEP
+    CURRENT_STEP = message
     log("\n" + message)
 
 
 def fail(message: str):
     raise RuntimeError(message)
+
+
+def report_error(message: str, log_path: Path | None = None):
+    detail = f"A instalação não foi concluída.\n\nEtapa: {CURRENT_STEP}\n\n{message}"
+    if log_path:
+        detail += f"\n\nLog com detalhes:\n{log_path}"
+    print(detail, flush=True)
+    if LOGGER:
+        LOGGER.write(detail + "\n")
+        LOGGER.flush()
+    if os.name == "nt" and getattr(sys, "frozen", False):
+        try:
+            import ctypes
+            ctypes.windll.user32.MessageBoxW(None, detail, "YaniNeko — Erro na instalação", 0x10)
+        except Exception:
+            pass  # The console and log retain the error if the dialog is unavailable.
 
 
 def run(command: list[str], cwd: Path | None = None, check: bool = True, env=None) -> subprocess.CompletedProcess[str]:
@@ -57,11 +77,14 @@ def run(command: list[str], cwd: Path | None = None, check: bool = True, env=Non
         )
     except FileNotFoundError:
         fail(f"Comando não encontrado: {command[0]}")
+    except PermissionError:
+        fail(f"O Windows bloqueou a execução de {command[0]}. Verifique as permissões e o histórico de proteção do antivírus.")
     if result.stdout:
         for line in result.stdout.rstrip().splitlines():
             log(line)
     if check and result.returncode != 0:
-        fail(f"Comando falhou com código {result.returncode}: {command[0]}")
+        tail = (result.stdout or "Sem detalhes retornados pelo programa.")[-1800:]
+        fail(f"Comando falhou com código {result.returncode}: {command[0]}\n{tail}")
     return result
 
 
@@ -107,9 +130,19 @@ def command_exists(name: str) -> bool:
 
 
 def install_git(tools: Path):
-    if command_exists("git"):
-        log("Git já disponível: " + run(["git", "--version"]).stdout.strip())
-        return
+    step("[1/8] Preparando Git")
+    for candidate in (shutil.which("git"), tools / "git/cmd/git.exe"):
+        if not candidate or not Path(candidate).is_file():
+            continue
+        try:
+            version = run([str(candidate), "--version"]).stdout.strip()
+            if not version.startswith("git version "):
+                continue
+            prepend_path(Path(candidate).parent)
+            log("Git já disponível: " + version)
+            return
+        except RuntimeError:
+            log("Git existente não funciona; preparando a cópia portátil.")
     step("[1/8] Instalando Git portátil")
     zip_path = tools / "mingit.zip"
     git_dir = tools / "git"
@@ -138,12 +171,21 @@ def install_git(tools: Path):
 
 
 def install_node(tools: Path):
-    if command_exists("node"):
-        version = run(["node", "--version"]).stdout.strip()
-        match = re.match(r"v(\d+)", version)
-        if match and int(match.group(1)) >= 22:
-            log("Node.js já disponível: " + version)
-            return
+    step("[2/8] Preparando Node.js")
+    candidates = [shutil.which("node"), *sorted((tools / "node").glob("node-*-win-x64/node.exe"), reverse=True)]
+    for candidate in candidates:
+        if not candidate or not Path(candidate).is_file():
+            continue
+        try:
+            version = run([str(candidate), "--version"]).stdout.strip()
+            match = re.fullmatch(r"v(\d+)\.(\d+)\.(\d+)", version)
+            npm_cli = Path(candidate).parent / "node_modules/npm/bin/npm-cli.js"
+            if match and tuple(map(int, match.groups())) >= (22, 13, 0) and npm_cli.is_file():
+                prepend_path(Path(candidate).parent)
+                log("Node.js já disponível: " + version)
+                return
+        except RuntimeError:
+            log("Node.js existente não funciona; preparando a cópia portátil.")
     step("[2/8] Instalando Node.js 22 portátil")
     arch = "x64" if sys.maxsize > 2**32 else "x86"
     request = urllib.request.Request("https://nodejs.org/dist/index.json", headers={"User-Agent": "YaniNeko-installer/1.0"})
@@ -158,30 +200,33 @@ def install_node(tools: Path):
     download(f"https://nodejs.org/dist/{version}/node-{version}-win-{arch}.zip", archive)
     shutil.rmtree(node_dir, ignore_errors=True)
     extract_zip(archive, node_dir)
-    folders = [p for p in node_dir.iterdir() if p.is_dir()]
+    folders = [p for p in node_dir.iterdir() if p.is_dir() and (p / "node.exe").is_file()
+               and (p / "node_modules/npm/bin/npm-cli.js").is_file()]
     if not folders:
         fail("Node.js portátil não foi extraído corretamente.")
     prepend_path(folders[0])
-    log(f"OK: {run(['node', '--version']).stdout.strip()} / npm {run(['npm', '--version']).stdout.strip()}")
+    node = str(folders[0] / "node.exe")
+    npm_cli = str(folders[0] / "node_modules/npm/bin/npm-cli.js")
+    log(f"OK: {run([node, '--version']).stdout.strip()} / npm {run([node, npm_cli, '--version']).stdout.strip()}")
 
 
 def install_pnpm(tools: Path):
+    global PNPM_COMMAND
     step(f"[3/8] Preparando pnpm {PNPM_VERSION}")
-    corepack = shutil.which("corepack")
-    if not corepack:
-        fail("Corepack não foi encontrado junto do Node.js.")
-    os.environ["COREPACK_HOME"] = str(tools / "corepack")
-    os.environ["COREPACK_ENABLE_DOWNLOAD_PROMPT"] = "0"
-    # Node pode estar em Program Files; os shims devem pertencer ao usuário.
-    shims = tools / "corepack-bin"
-    shims.mkdir(parents=True, exist_ok=True)
-    run([corepack, "enable", "--install-directory", str(shims), "pnpm"])
-    prepend_path(shims)
-    run([corepack, "prepare", f"pnpm@{PNPM_VERSION}", "--activate"])
-    pnpm = shutil.which("pnpm")
-    if not pnpm:
-        fail("pnpm não foi ativado pelo Corepack.")
-    log("OK: " + run([pnpm, "--version"]).stdout.strip())
+    node = shutil.which("node")
+    if not node:
+        fail("Node.js não ficou disponível após a preparação automática.")
+    prefix = tools / "pnpm"
+    cli = prefix / "node_modules/pnpm/bin/pnpm.mjs"
+    npm_cli = Path(node).parent / "node_modules/npm/bin/npm-cli.js"
+    if not npm_cli.is_file():
+        fail("A instalação do Node.js está incompleta: npm-cli.js não encontrado.")
+    # Run JS entry points directly: no global install, Corepack or .cmd launcher needed.
+    if not cli.is_file() or run([node, str(cli), "--version"], check=False).stdout.strip() != PNPM_VERSION:
+        run([node, str(npm_cli), "install", "--prefix", str(prefix), "--no-audit", "--no-fund",
+             "--ignore-scripts", f"pnpm@{PNPM_VERSION}"])
+    PNPM_COMMAND = [node, str(cli)]
+    log("OK: " + run([*PNPM_COMMAND, "--version"]).stdout.strip())
 
 
 def download_plugin(work: Path, script_dir: Path) -> Path:
@@ -242,9 +287,10 @@ def prepare_vencord(install_root: Path, plugin_source: Path):
 
 def build(vencord: Path, plugin_source: Path):
     step("[6/8] Instalando dependências e compilando")
-    pnpm = shutil.which("pnpm") or "pnpm"
-    run([pnpm, "install", "--frozen-lockfile"], cwd=vencord)
-    run([pnpm, "build", "--disable-updater"], cwd=vencord)
+    if not PNPM_COMMAND:
+        fail("pnpm não foi preparado pelo instalador.")
+    run([*PNPM_COMMAND, "install", "--frozen-lockfile"], cwd=vencord)
+    run([*PNPM_COMMAND, "build", "--disable-updater"], cwd=vencord)
     renderer = vencord / "dist" / "renderer.js"
     if not renderer.is_file():
         fail("O build não gerou dist\\renderer.js.")
@@ -260,10 +306,16 @@ def build(vencord: Path, plugin_source: Path):
 
 
 def find_discord() -> Path:
-    discord = Path(os.environ["LOCALAPPDATA"]) / "Discord"
-    if not any(discord.glob("app-*/Discord.exe")):
+    local = os.environ.get("LOCALAPPDATA")
+    if not local:
+        fail("A pasta LOCALAPPDATA do usuário não foi encontrada. Execute o instalador na sua conta normal do Windows.")
+    discord = Path(local) / "Discord"
+    if not any(file.is_file() and re.fullmatch(r"app-\d+(?:\.\d+)*", file.parent.name)
+               for file in discord.glob("app-*/Discord.exe")):
+        alternatives = [name for name in ("DiscordPTB", "DiscordCanary") if (Path(local) / name).is_dir()]
+        hint = f" Foi encontrado apenas outro canal: {', '.join(alternatives)}. Este instalador usa Discord Stable." if alternatives else ""
         fail(f"Discord Stable não encontrado em {discord}. Instale e abra o Discord uma vez. "
-             "Execute este instalador na mesma conta do Windows que usa o Discord.")
+             "Execute este instalador na mesma conta do Windows que usa o Discord." + hint)
     return discord
 
 
@@ -320,28 +372,34 @@ def inject(vencord: Path):
 LOGGER = None
 
 def main() -> int:
-    global LOGGER
+    global LOGGER, CURRENT_STEP, PNPM_COMMAND
+    CURRENT_STEP = "Verificando requisitos"
+    PNPM_COMMAND = []
     if os.name != "nt":
-        print("ERRO: este script foi feito para Windows.")
+        report_error("Este instalador foi feito para Windows.")
         return 1
     if sys.maxsize <= 2**32:
-        print("ERRO: o projeto exige Windows 64-bit.")
+        report_error("O projeto exige Windows 64-bit.")
         return 1
     local_appdata = Path(os.environ.get("LOCALAPPDATA", Path.home() / "AppData" / "Local"))
     root = local_appdata / "LefferzinBypass"
     tools = root / "tools"
     logs = root / "logs"
-    root.mkdir(parents=True, exist_ok=True)
-    logs.mkdir(parents=True, exist_ok=True)
-    log_path = logs / f"install-{time.strftime('%Y%m%d-%H%M%S')}.log"
-    LOGGER = log_path.open("w", encoding="utf-8")
-    work = Path(tempfile.mkdtemp(prefix="YaniNeko-"))
+    log_path = None
+    work = None
     script_dir = Path(__file__).resolve().parent
-    log("=" * 54)
-    log(" YaniNeko - Instalador Python automático")
-    log("=" * 54)
-    log(f"Log: {log_path}")
     try:
+        root.mkdir(parents=True, exist_ok=True)
+        logs.mkdir(parents=True, exist_ok=True)
+        candidate_log = logs / f"install-{time.strftime('%Y%m%d-%H%M%S')}.log"
+        LOGGER = candidate_log.open("w", encoding="utf-8")
+        log_path = candidate_log
+        work = Path(tempfile.mkdtemp(prefix="YaniNeko-"))
+        log("=" * 54)
+        log(" YaniNeko - Instalador Python automático")
+        log("=" * 54)
+        log(f"Log: {log_path}")
+        step("Verificando a instalação do Discord Stable")
         find_discord()
         install_git(tools)
         install_node(tools)
@@ -350,19 +408,21 @@ def main() -> int:
         vencord = prepare_vencord(root, plugin_source)
         build(vencord, plugin_source)
         inject(vencord)
+        step("Configurando atualizações automáticas")
         run([shutil.which("node"), str(plugin_source / "auto-update.cjs"), "--install", str(vencord), str(plugin_source)], cwd=vencord)
         step("[8/8] Finalização")
         log("INSTALAÇÃO CONCLUÍDA.")
         log("Abra o Discord e ative LefferzinBypass em Configurações > Plugins.")
         return 0
     except Exception as exc:
-        log(f"\nINSTALAÇÃO FALHOU: {exc}")
-        log(f"Log completo: {log_path}")
+        report_error(str(exc), log_path)
         return 1
     finally:
-        shutil.rmtree(work, ignore_errors=True)
+        if work:
+            shutil.rmtree(work, ignore_errors=True)
         if LOGGER:
             LOGGER.close()
+            LOGGER = None
 
 
 if __name__ == "__main__":
