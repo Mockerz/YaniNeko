@@ -253,6 +253,14 @@ export interface ProtonServerEntry {
     free?: boolean;
 }
 
+const OPTIMIZATION_EXCLUDED_COUNTRIES = ["BR", "JP", "CH", "PL", "RO"];
+const OPTIMIZATION_MAX_LOAD = 75;
+
+export function isOptimizationRouteAllowed(server: { country?: string; load?: number }): boolean {
+    return !OPTIMIZATION_EXCLUDED_COUNTRIES.includes(server.country?.trim().toUpperCase() || "")
+        && !(typeof server.load === "number" && server.load > OPTIMIZATION_MAX_LOAD);
+}
+
 export async function listAvailableServers(
     dataDir: string,
     options: {
@@ -289,7 +297,7 @@ export async function listAvailableServers(
             const country = typeof raw.country === "string" && raw.country.trim() ? raw.country.trim().toUpperCase().slice(0, 4) : "--";
             const entry: ProtonServerEntry = { id, name, country };
             if (typeof raw.city === "string" && raw.city.trim()) entry.city = raw.city.trim().slice(0, 120);
-            if (finitePositive(raw.load)) entry.load = raw.load;
+            if (typeof raw.load === "number" && Number.isFinite(raw.load) && raw.load >= 0) entry.load = raw.load;
             if (typeof raw.tier === "string" || Number.isInteger(raw.tier)) entry.tier = raw.tier as string | number;
             if (finitePositive(raw.pingMs)) entry.pingMs = raw.pingMs;
             else if (finitePositive(raw.ping)) entry.pingMs = raw.ping;
@@ -546,7 +554,8 @@ export async function generateOptimalProtonConfig(
     const output = path.join(dataDir, "wireguard.conf");
     const staging = path.join(dataDir, `.wireguard.conf.${randomUUID()}.tmp`);
     let selectedServer = options.serverId?.trim() || "";
-    if (selectedServer) try {
+    let excludedServers: string[] = [];
+    try {
         const available = await listAvailableServers(dataDir, {
             username: options.username,
             countries: options.country,
@@ -557,21 +566,26 @@ export async function generateOptimalProtonConfig(
         if (!available.success || !Array.isArray(available.servers)) {
             return { success: false, error: available.error || "Não foi possível consultar as rotas Proton." };
         }
-        const eligible = available.servers;
+        const eligible = available.servers.filter(isOptimizationRouteAllowed);
+        excludedServers = available.servers.filter(server => !isOptimizationRouteAllowed(server)).map(server => server.name);
+        if (eligible.length === 0) {
+            return { success: false, error: "Nenhuma rota disponível após excluir BR, JP, CH, PL, RO e servidores com carga acima de 75%." };
+        }
         if (selectedServer) {
             const selected = eligible.find(server =>
                 server.id.toLowerCase() === selectedServer.toLowerCase()
                 || server.name.toLowerCase() === selectedServer.toLowerCase()
             );
             if (!selected) {
-                return { success: false, error: "A rota selecionada não está disponível na lista atual de servidores Proton." };
+                return { success: false, error: "A rota selecionada está indisponível, em um país excluído ou com carga acima de 75%." };
             }
             selectedServer = selected.name;
         }
     } catch (error) {
         return { success: false, error: `Não foi possível filtrar as rotas Proton: ${logError(error)}` };
     }
-    const args = ["-username", options.username.trim(), "-session-file", protonSessionFile(dataDir), "-output", staging, "-json", "-ipv6", "-exclude-countries", "BR"];
+    const args = ["-username", options.username.trim(), "-session-file", protonSessionFile(dataDir), "-output", staging, "-json", "-ipv6", "-exclude-countries", OPTIMIZATION_EXCLUDED_COUNTRIES.join(",")];
+    if (excludedServers.length > 0) args.push("-exclude-servers", excludedServers.join(","));
     // Sem destino explícito, o confgen exige seleção global por ping.
     if (options.autoPing !== false || (!options.country?.trim() && !selectedServer)) args.push("-auto-ping");
     if (options.speedTest) args.push("-speed-test", "-progress-json");
@@ -586,6 +600,10 @@ export async function generateOptimalProtonConfig(
         const measured = !options.speedTest || (finitePositive(result.json?.downloadMbps) && finitePositive(result.json?.uploadMbps));
         if (result.code === 0 && result.json?.success === true && measured && fs.existsSync(staging)) {
             if (options.signal?.aborted) throw abortError();
+            if (!isOptimizationRouteAllowed({
+                country: typeof result.json.country === "string" ? result.json.country : undefined,
+                load: typeof result.json.load === "number" ? result.json.load : undefined,
+            })) return { success: false, error: "A rota retornada está em um país excluído ou ultrapassou 75% de carga. O perfil anterior foi preservado." };
             fs.renameSync(staging, output);
             return {
                 success: true,
