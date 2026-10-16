@@ -592,6 +592,7 @@ export class PluginVpnController {
             // carga passam para a etapa de comparação de latência, evitando
             // testar dezenas de servidores desnecessariamente.
             const pingCandidates = listed.servers
+                .filter(proton.isOptimizationRouteAllowed)
                 .filter(server => server.id !== current?.id && typeof server.load === "number" && server.load <= AUTO_ROUTE_LOAD_LIMIT)
                 .sort((a, b) => (a.load ?? 100) - (b.load ?? 100) || a.country.localeCompare(b.country) || a.name.localeCompare(b.name))
                 .slice(0, AUTO_ROUTE_PING_CANDIDATES);
