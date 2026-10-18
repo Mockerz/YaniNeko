@@ -76,6 +76,10 @@ function normalizeUsername(value: string): string {
     return value.trim().slice(0, 320);
 }
 
+function needsAdminConsent(message: string | undefined): boolean {
+    return /1223|cancel(?:ed|ado|ada)?|negad[oa]|denied|access is denied|acesso negado|autoriza.{0,24}administrador/i.test(message || "");
+}
+
 export class PluginVpnController {
     private readonly options: PluginVpnControllerOptions;
     private readonly dataDir: string;
@@ -183,6 +187,7 @@ export class PluginVpnController {
                 await this.stopInternal(false);
                 return;
             }
+            await windows.ensureWireSockRecovery(this.serviceConfigPath, this.options.log);
             this.generation = Math.max(this.generation, owner?.generation ?? 0);
             this.adoptOwnership(owner, inspection);
             this.state = "active";
@@ -264,7 +269,9 @@ export class PluginVpnController {
             // Retry automático para racings de primeiro-login / sessão recém criada
             // ou serviço do WireSock que demora para aparecer no SCM/WMI.
             // Só tenta de novo se não for um conflito explícito de coisa externa.
-            const retryless = first.state === "blocked_external" || /exter|outro perfil|GUI|plugin/i.test(first.error || "");
+            const retryless = first.state === "blocked_external"
+                || needsAdminConsent(first.error)
+                || /exter|outro perfil|GUI|plugin/i.test(first.error || "");
             if (retryless) return first;
             this.options.log("warn", "primeira tentativa de enable falhou; aguardando 1s e tentando novamente", { estado: first.state, erro: first.error });
             await new Promise<void>(r => setTimeout(r, 1000));
@@ -290,6 +297,12 @@ export class PluginVpnController {
                     this.options.log("warn", "segunda tentativa falhou mas WireSock está ativo sem conflito; assumindo sucesso por exclusão", { serviços: inspection.services });
                     return { success: true, state: "active", message: this.statusMessage() };
                 }
+            }
+            if (second.state !== "blocked_external" && this.options.isEnabled() && this.settings().protonUsername && !needsAdminConsent(second.error)) {
+                this.state = "recovery_required";
+                this.options.log("warn", "ativação inicial falhou; nova tentativa automática agendada", { erro: second.error });
+                this.scheduleRecovery(0);
+                return { ...second, state: "recovery_required", error: `${second.error || "A VPN não iniciou."} Nova tentativa automática agendada.` };
             }
             return second;
         });
@@ -1070,6 +1083,17 @@ export class PluginVpnController {
                         this.blockExternal(inspection.reason || "WireSock externo encontrado durante a recuperação.");
                         return;
                     }
+                    if (inspection.active && inspection.owned) {
+                        this.generation = Math.max(this.generation, owner?.generation ?? 0);
+                        this.adoptOwnership(owner, inspection);
+                        this.state = "active";
+                        this.discordPid = process.pid;
+                        this.externalReason = null;
+                        this.startWatchdog();
+                        this.startDiagnostics("recovery-adoption");
+                        this.options.log("info", "WireSock reiniciado pelo Windows; sessão recuperada automaticamente");
+                        return;
+                    }
                     // Limpa apenas a sessão própria, preservando conta e perfil Proton.
                     const stopped = await this.stopInternal(false);
                     const result = stopped.success ? await this.startInternal(false) : stopped;
@@ -1077,6 +1101,11 @@ export class PluginVpnController {
                         tentativa: attempt + 1, sucesso: result.success, erro: result.error,
                     });
                     if (result.success || result.state === "blocked_external") return;
+                    if (needsAdminConsent(result.error)) {
+                        this.state = "recovery_required";
+                        this.options.log("error", "recuperação automática pausada: o Windows exige autorização de administrador");
+                        return;
+                    }
                 } catch (error) {
                     this.options.log("warn", "recuperação automática falhou", { erro: errorMessage(error) });
                 }

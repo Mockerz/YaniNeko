@@ -22,6 +22,9 @@ const WIRESOCK_INSTALLER_SHA256 = "abfeebdc645de36b95fabbed00c7fdb0bf4d0c68c5518
 const WIRESOCK_DRIVER_NAMES = ["ndiswg", "NDISRD"] as const;
 const WIRESOCK_EXECUTABLE = "wiresock-client.exe";
 const MAX_DOWNLOAD_BYTES = 512 * 1024 * 1024;
+const WIRESOCK_SERVICE_NAME = "wiresock-client-service";
+const WIRESOCK_RECOVERY_MARKER = "wiresock-service-recovery-v1";
+const WIRESOCK_RECOVERY_ATTEMPT_MARKER = "wiresock-service-recovery-attempted-v1";
 
 export type WireSockLogger = (level: "info" | "warn" | "error", message: string, data?: Record<string, unknown>) => void;
 
@@ -520,7 +523,7 @@ function serviceScript(executable: string, configPath: string): string {
     const expected = `"${executable}" service -config "${configPath}" -log-level info -network-lock disabled`;
     return `$ErrorActionPreference='Stop'
 try {
-  $name='wiresock-client-service'
+  $name=${quotePowerShell(WIRESOCK_SERVICE_NAME)}
   $expected=${quotePowerShell(expected)}
   $config=${quotePowerShell(configPath)}
   $service=Get-Service -Name $name -ErrorAction SilentlyContinue
@@ -537,20 +540,126 @@ try {
   if($change.ReturnValue -ne 0){ throw "Falha ao atualizar o perfil do serviço: $($change.ReturnValue)" }
   $actual=Get-CimInstance Win32_Service -Filter "Name='$name'"
   if($actual.PathName -cne $expected){ throw 'O serviço WireSock permaneceu com outra configuração' }
+  $sc=Join-Path $env:SystemRoot 'System32\\sc.exe'
+  & $sc failure $name reset= 86400 actions= restart/5000/restart/15000/restart/60000 | Out-Null
+  if($LASTEXITCODE -ne 0){ throw "Falha ao configurar a recuperação automática do serviço WireSock: $LASTEXITCODE" }
   Start-Service -Name $name
   (Get-Service -Name $name).WaitForStatus('Running',[TimeSpan]::FromSeconds(20))
-} catch { [Console]::Error.WriteLine($_.Exception.Message); exit 1 }`;
+} catch {
+  $detail=$_.Exception.ToString()
+  if($env:YANI_ELEVATED_ERROR_FILE){ try { [System.IO.File]::WriteAllText($env:YANI_ELEVATED_ERROR_FILE,$detail,[System.Text.Encoding]::UTF8) } catch {} }
+  [Console]::Error.WriteLine($_.Exception.Message)
+  exit 1
+}`;
 }
 
-function elevatedPowerShellArgs(script: string): string[] {
+function elevatedPowerShellArgs(script: string, diagnosticPath: string): string[] {
     const encoded = Buffer.from(script, "utf16le").toString("base64");
     const wrapper = `$ErrorActionPreference='Stop'
+$env:YANI_ELEVATED_ERROR_FILE=${quotePowerShell(diagnosticPath)}
 $identity=[Security.Principal.WindowsIdentity]::GetCurrent()
 $principal=New-Object Security.Principal.WindowsPrincipal($identity)
 if($principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)){ & powershell.exe -NoProfile -NonInteractive -EncodedCommand ${encoded}; exit $LASTEXITCODE }
-$child=Start-Process powershell.exe -Verb RunAs -WindowStyle Hidden -Wait -PassThru -ArgumentList '-NoProfile -NonInteractive -EncodedCommand ${encoded}'
-exit $child.ExitCode`;
+try {
+  $child=Start-Process powershell.exe -Verb RunAs -WindowStyle Hidden -Wait -PassThru -ErrorAction Stop -ArgumentList '-NoProfile -NonInteractive -EncodedCommand ${encoded}'
+  exit $child.ExitCode
+} catch {
+  $detail=$_.Exception.ToString()
+  if($env:YANI_ELEVATED_ERROR_FILE){ try { [System.IO.File]::WriteAllText($env:YANI_ELEVATED_ERROR_FILE,$detail,[System.Text.Encoding]::UTF8) } catch {} }
+  if($_.Exception.HResult -eq -2147023673 -or $detail -match '1223|cancel|cancelled|canceled') { exit 1223 }
+  [Console]::Error.WriteLine($detail)
+  exit 1
+}`;
     return ["-NoProfile", "-NonInteractive", "-EncodedCommand", Buffer.from(wrapper, "utf16le").toString("base64")];
+}
+
+function recoveryMarkerPath(configPath: string): string {
+    return `${path.resolve(configPath)}.recovery-v1`;
+}
+
+function writeRecoveryMarker(configPath: string, log: WireSockLogger): void {
+    try {
+        const marker = recoveryMarkerPath(configPath);
+        fs.mkdirSync(path.dirname(marker), { recursive: true });
+        fs.writeFileSync(marker, WIRESOCK_RECOVERY_MARKER, "utf8");
+    } catch (error) {
+        log("warn", "não consegui salvar o marcador da recuperação automática do WireSock", { erro: logError(error) });
+    }
+}
+
+function writeRecoveryAttemptMarker(configPath: string, log: WireSockLogger): void {
+    try {
+        const marker = recoveryMarkerPath(configPath);
+        fs.mkdirSync(path.dirname(marker), { recursive: true });
+        fs.writeFileSync(marker, WIRESOCK_RECOVERY_ATTEMPT_MARKER, "utf8");
+    } catch (error) {
+        log("warn", "não consegui salvar o marcador da tentativa de recuperação automática do WireSock", { erro: logError(error) });
+    }
+}
+
+function runElevatedPowerShell(script: string, timeoutMs: number): Promise<void> {
+    const diagnosticDir = fs.mkdtempSync(path.join(os.tmpdir(), "yanineko-wiresock-elevation-"));
+    const diagnosticPath = path.join(diagnosticDir, "error.txt");
+    return new Promise((resolve, reject) => {
+        execFile("powershell.exe", elevatedPowerShellArgs(script, diagnosticPath), {
+            windowsHide: true, timeout: timeoutMs, encoding: "utf8",
+        }, (error, _stdout, stderr) => {
+            try {
+                if (!error) { resolve(); return; }
+                let childDetail = "";
+                try { childDetail = fs.readFileSync(diagnosticPath, "utf8").replace(/^\uFEFF/, "").trim(); } catch {}
+                const detail = childDetail || String(stderr || "").trim();
+                const code = (error as NodeJS.ErrnoException).code;
+                const codeText = code === undefined ? "" : String(code);
+                if (codeText === "1223") {
+                    reject(new Error("UAC_CANCELLED: A autorização de administrador foi cancelada."));
+                    return;
+                }
+                const failure = error as NodeJS.ErrnoException & { killed?: boolean; signal?: string | null };
+                const fallback = failure.killed
+                    ? `PowerShell foi encerrado (${failure.signal || "timeout"}).`
+                    : code !== undefined
+                        ? `PowerShell encerrou com código ${codeText}.`
+                        : `Não foi possível iniciar PowerShell (${failure.code || failure.name}).`;
+                reject(new Error(detail || fallback));
+            } finally {
+                try { fs.rmSync(diagnosticDir, { recursive: true, force: true }); } catch {}
+            }
+        });
+    });
+}
+
+export async function ensureWireSockRecovery(configPath: string, log: WireSockLogger): Promise<boolean> {
+    if (!isWindows()) return false;
+    const marker = recoveryMarkerPath(configPath);
+    try {
+        const existingMarker = fs.readFileSync(marker, "utf8");
+        if (existingMarker === WIRESOCK_RECOVERY_MARKER) return true;
+        if (existingMarker === WIRESOCK_RECOVERY_ATTEMPT_MARKER) return false;
+    } catch { /* Instalações anteriores ainda não têm a configuração. */ }
+    const script = `$ErrorActionPreference='Stop'
+try {
+  $name=${quotePowerShell(WIRESOCK_SERVICE_NAME)}
+  $service=Get-Service -Name $name -ErrorAction Stop
+  $sc=Join-Path $env:SystemRoot 'System32\\sc.exe'
+  & $sc failure $name reset= 86400 actions= restart/5000/restart/15000/restart/60000 | Out-Null
+  if($LASTEXITCODE -ne 0){ throw "Falha ao configurar a recuperação automática do serviço WireSock: $LASTEXITCODE" }
+} catch {
+  $detail=$_.Exception.ToString()
+  if($env:YANI_ELEVATED_ERROR_FILE){ try { [System.IO.File]::WriteAllText($env:YANI_ELEVATED_ERROR_FILE,$detail,[System.Text.Encoding]::UTF8) } catch {} }
+  [Console]::Error.WriteLine($_.Exception.Message)
+  exit 1
+}`;
+    try {
+        await runElevatedPowerShell(script, 30_000);
+        writeRecoveryMarker(configPath, log);
+        log("info", "recuperação automática do WireSock configurada pelo Windows", { service: WIRESOCK_SERVICE_NAME });
+        return true;
+    } catch (error) {
+        writeRecoveryAttemptMarker(configPath, log);
+        log("warn", "não foi possível migrar a recuperação automática do WireSock", { erro: logError(error) });
+        return false;
+    }
 }
 
 export async function startWireSockService(
@@ -581,15 +690,15 @@ export async function startWireSockService(
     fs.renameSync(staging, target);
 
     try {
-        await new Promise<void>((resolve, reject) => {
-            execFile("powershell.exe", elevatedPowerShellArgs(serviceScript(executable, target)), {
-                windowsHide: true, timeout: 120_000,
-            }, error => error ? reject(error) : resolve());
-        });
+        await runElevatedPowerShell(serviceScript(executable, target), 120_000);
+        writeRecoveryMarker(target, log);
     } catch (error) {
         try { fs.rmSync(staging, { force: true }); } catch {}
-        log("error", "falha ao iniciar o serviço WireSock", { erro: logError(error) });
-        throw new Error("Não foi possível configurar/iniciar o serviço WireSock. Confira a permissão de administrador e os logs.");
+        const detail = logError(error);
+        log("error", "falha ao iniciar o serviço WireSock", { erro: detail });
+        if (/1223|cancel|cancelado|canceled|negado|denied|acesso negado/i.test(detail))
+            throw new Error("A autorização de administrador para configurar o WireSock foi negada ou cancelada.");
+        throw new Error(`Não foi possível configurar/iniciar o serviço WireSock: ${detail}`);
     }
 
     let inspection: WireSockInspection | null = null;
