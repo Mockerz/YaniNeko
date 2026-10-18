@@ -5,7 +5,7 @@ title YaniNeko - Baixar e instalar
 
 :: Discord e instalado por usuario. Nao trocar a conta via elevacao automatica.
 
-set "URL=https://github.com/Mockerz/YaniNeko/releases/download/4.0.0/YaniNeko-Installer.exe"
+set "URL=https://github.com/Mockerz/YaniNeko/releases/download/4.0.1/YaniNeko-Installer.exe"
 set "OUT=%TEMP%\YaniNeko-Installer-auto-%RANDOM%-%RANDOM%.exe"
 
 :: Permite testar a recompilacao antes de publicar a nova release.
@@ -48,7 +48,7 @@ echo.
 echo Download concluido.
 :instalar
 echo Validando o instalador...
-powershell.exe -NoProfile -Command "$actual=(Get-FileHash -LiteralPath $env:OUT -Algorithm SHA256).Hash; if ($actual -ne '66E92CE7ED982DCC05293DDE5D6F5F12AFD63230E088C83CB174457A8D971506') { exit 1 }"
+powershell.exe -NoProfile -Command "$actual=(Get-FileHash -LiteralPath $env:OUT -Algorithm SHA256).Hash; if ($actual -ne 'FA33C5B4F5E113FF6DB1E605F1BF11401CCE4D361A02C5656B9C369EC953FF06') { exit 1 }"
 if errorlevel 1 (
     echo [ERRO] O instalador nao corresponde a esta versao do BAT. Baixe ambos novamente.
     pause

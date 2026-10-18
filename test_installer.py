@@ -95,6 +95,16 @@ class InstallerTests(unittest.TestCase):
             self.assertIn("Verificando Discord", output.getvalue())
             self.assertIn("install.log", output.getvalue())
 
+    def test_legacy_console_keeps_unicode_in_log(self):
+        raw = io.BytesIO()
+        console = io.TextIOWrapper(raw, encoding="cp1252")
+        logfile = io.StringIO()
+        with patch("sys.stdout", console), patch.object(installer, "LOGGER", logfile):
+            installer.log("✓ Build concluído → OK")
+            installer.report_error("✗ teste de erro")
+        self.assertIn("Build concluído", raw.getvalue().decode("cp1252"))
+        self.assertIn("✓ Build concluído → OK", logfile.getvalue())
+
 
 if __name__ == "__main__":
     unittest.main()

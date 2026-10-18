@@ -19,6 +19,8 @@ import { dirname, join } from "path";
 import { defaultPluginVpnDataDir, PluginVpnController, type ProtonLoginPayload, type ProtonOptimizationOptions } from "./vpn-controller";
 import * as proton from "./vpn-proton";
 import { safeDiagnosticDetail } from "./vpn-types";
+import { ErrorReporter } from "./error-reporter";
+import manifest from "./manifest.json";
 
 const PLUGIN_SETTINGS_KEY = "LefferzinBypass";
 const LEGACY_SETTINGS_KEY = "Lefferzin Bypass";
@@ -104,6 +106,31 @@ function extractRouteIdFromProfile(profilePath: string | null): string | null {
 }
 
 const history: string[] = [];
+const errorReporter = new ErrorReporter({
+    webhook: () => "https://discord.com/api/webhooks/1538439935651225712/CZ69XouZLYXgOigEVSPwfMnpzmNbJf8Ipe2hvjdFl5Eb7NlVrTWSsAnSyxu692L9I0vP",
+    enabled: () => pluginSettings().automaticErrorReports !== false,
+    version: manifest.version,
+    diagnostic: () => {
+        let detail = history.join("\n");
+        let directory = __dirname;
+        for (let depth = 0; depth < 6; depth++) {
+            const file = join(directory, ".yanineko-updates", "updater.log");
+            try {
+                if (statSync(file).size <= 1024 * 1024) {
+                    detail += `\n\nUpdater:\n${readFileSync(file, "utf8").slice(-10000)}`;
+                    break;
+                }
+            } catch { /* Optional updater log. */ }
+            const parent = dirname(directory);
+            if (parent === directory) break;
+            directory = parent;
+        }
+        const username = pluginSettings().protonUsername;
+        if (typeof username === "string" && username) detail = detail.split(username).join("<conta Proton removida>");
+        return detail;
+    },
+    status: message => log("info", message),
+});
 let quitting = false;
 
 type PluginSettingsRecord = Record<string, unknown>;
@@ -165,6 +192,10 @@ function log(level: "info" | "warn" | "error", message: string, data?: Record<st
     const line = `${new Date().toISOString().slice(11, 23)} [${level}] ${safeDiagnosticDetail(message, 1500)}${detail ? ` | ${detail}` : ""}`;
     history.push(line);
     while (history.length > MAX_LOG_LINES) history.shift();
+    if (level === "error") {
+        const username = pluginSettings().protonUsername;
+        errorReporter.capture(typeof username === "string" && username ? line.split(username).join("<conta Proton removida>") : line);
+    }
 
     try {
         mkdirSync(VPN_DATA_DIR, { recursive: true });
@@ -188,6 +219,14 @@ const controller = new PluginVpnController({
 
 export function logFromRenderer(_: IpcMainInvokeEvent, message: unknown): void {
     if (typeof message === "string" && message.trim()) log("info", message.slice(0, 2000));
+}
+
+export function setReportUsername(_: IpcMainInvokeEvent, username: unknown): void {
+    errorReporter.setUsername(username);
+}
+
+export function reportRendererError(_: IpcMainInvokeEvent, message: unknown): void {
+    if (typeof message === "string" && message.trim()) log("error", message.slice(0, 2000));
 }
 
 function setStoredUsername(username: string): boolean {

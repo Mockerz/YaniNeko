@@ -30,11 +30,27 @@ const Native = VencordNative?.pluginHelpers?.LefferzinBypass as PluginNative<typ
 const logger = new Logger("Lefferzin Bypass");
 
 function showToast(message: string, type: "message" | "success" | "failure" = "message"): void {
+    if (type === "failure") reportError(message);
     try {
         discordShowToast(message, type);
     } catch (error) {
-        logger.error("Falha ao exibir notificação", error);
+        recordError("Falha ao exibir notificação", error);
     }
+}
+
+function recordError(message: string, error?: unknown): void {
+    logger.error(message, error);
+    reportError(message, error);
+}
+
+function syncReportUsername(): void {
+    void Native?.setReportUsername(UserStore.getCurrentUser()?.username ?? "").catch(() => {});
+}
+
+function reportError(message: string, error?: unknown): void {
+    syncReportUsername();
+    const detail = error instanceof Error ? error.message : error == null ? "" : String(error);
+    void Native?.reportRendererError(`${message}${detail ? `: ${detail}` : ""}`).catch(() => {});
 }
 
 let updateNotificationTimer: ReturnType<typeof setInterval> | null = null;
@@ -166,7 +182,7 @@ async function checkRouteAutomatically(): Promise<void> {
         }
     } catch (error) {
         if (!pluginRunning || generation !== pluginGeneration) return;
-        logger.error("Falha na verificação automática de rota", error);
+        recordError("Falha na verificação automática de rota", error);
     }
 }
 
@@ -199,7 +215,7 @@ async function refreshPresenceStatus(): Promise<void> {
             stopPresence();
         }
     } catch (error) {
-        logger.error("Falha ao atualizar o status global do Presence", error);
+        recordError("Falha ao atualizar o status global do Presence", error);
     } finally {
         presenceStatusBusy = false;
     }
@@ -272,6 +288,11 @@ function AboutPlugin() {
 }
 
 const settings = definePluginSettings({
+    automaticErrorReports: {
+        type: OptionType.BOOLEAN,
+        description: "Enviar erros e diagnóstico recente ao Discord do suporte Yani Neko, com seu nome de usuário do Discord. Senhas e tokens são filtrados.",
+        default: true
+    },
     aboutSettings: {
         type: OptionType.COMPONENT,
         description: "Passo a passo rapido: 1) Entrar na conta Proton  ->  2) Otimizar rota  ->  3) Start Bypass",
@@ -387,7 +408,7 @@ function VpnPanel() {
                 : savedRecord.sessionUsername;
             if (!username && typeof savedUsername === "string" && savedUsername) setUsername(savedUsername);
         } catch (error) {
-            logger.error("Falha ao ler o estado da VPN do plugin", error);
+            recordError("Falha ao ler o estado da VPN do plugin", error);
         }
     };
 
@@ -829,7 +850,7 @@ function reportSession() {
     Native.getVpnStatus().then(status => {
         record(`sessao aberta | VPN ${status.state} | ativa ${status.active} | ownership ${status.owned}`);
         if (videoIsBlocked()) record("o servidor ainda reporta o guard de video; nenhuma troca automatica de rede foi feita");
-    }).catch(error => logger.error("Falha ao consultar a VPN do plugin", error));
+    }).catch(error => recordError("Falha ao consultar a VPN do plugin", error));
 }
 
 function ask(store: object, method: string, ...args: unknown[]) {
@@ -968,7 +989,7 @@ function pollStreamClaim() {
         // Watchdog e diagnostico: uma mudanca de store nunca pode derrubar o
         // renderer. Registra uma vez e continua tentando nos proximos ciclos.
         if (!streamClaimProbeFailed)
-            logger.error("Failed to inspect the native stream state", error);
+            recordError("Failed to inspect the native stream state", error);
         streamClaimProbeFailed = true;
     }
 }
@@ -1091,15 +1112,18 @@ export default definePlugin({
 
     flux: {
         CONNECTION_OPEN() {
+            syncReportUsername();
             reportSession();
         },
 
         LOGOUT() {
+            void Native?.setReportUsername("").catch(() => {});
             record("voce saiu da conta; a VPN do plugin permanece isolada e nao troca a rota automaticamente");
         }
     },
 
     start() {
+        syncReportUsername();
         pluginRunning = true;
         const generation = ++pluginGeneration;
         const isCurrent = () => pluginRunning && generation === pluginGeneration;
@@ -1126,10 +1150,10 @@ export default definePlugin({
                 }
             }).catch(error => {
                 if (!isCurrent()) return;
-                logger.error("Não conseguiu falar com o processo desktop", error);
+                recordError("Não conseguiu falar com o processo desktop", error);
             });
         }).catch(error => {
-            if (isCurrent()) logger.error("Falha ao ler configurações na inicialização", error);
+            if (isCurrent()) recordError("Falha ao ler configurações na inicialização", error);
         });
     },
 
@@ -1149,6 +1173,6 @@ export default definePlugin({
         // Desativar o plugin só pode parar a sessão que ele consegue provar
         // que é sua. O wipe global é destrutivo e fica reservado ao botão de
         // recuperação/logout explícito.
-        Native?.shutdown(false).catch(error => logger.error("shutdown do WireSock falhou", error));
+        Native?.shutdown(false).catch(error => recordError("shutdown do WireSock falhou", error));
     }
 });

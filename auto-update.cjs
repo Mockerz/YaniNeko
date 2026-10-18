@@ -7,7 +7,7 @@ const { spawn, spawnSync } = require("node:child_process");
 const REPO = "Mockerz/YaniNeko";
 const BRANCH = "main";
 const INTERVAL = 3 * 60 * 60 * 1000;
-const REQUIRED = ["manifest.json", "index.tsx", "native.ts", "presence.ts", "stability.ts", "vpn-controller.ts", "vpn-proton.ts", "vpn-types.ts", "vpn-windows.ts", "bin/win32-x64/proton-confgen.exe"];
+const REQUIRED = ["manifest.json", "index.tsx", "native.ts", "presence.ts", "stability.ts", "error-reporter.ts", "vpn-controller.ts", "vpn-proton.ts", "vpn-types.ts", "vpn-windows.ts", "bin/win32-x64/proton-confgen.exe"];
 const ARTIFACTS = ["patcher.js", "preload.js", "renderer.js", "bin/win32-x64/proton-confgen.exe"];
 const validId = id => typeof id === "string" && /^(?:[a-f0-9]{40}|local-[a-f0-9]{32})$/.test(id);
 const hash = data => crypto.createHash("sha256").update(data).digest("hex");
@@ -84,6 +84,44 @@ function copyTree(source, target) {
         return true;
     } });
 }
+function quarantine(root, relative, reason) {
+    const source = inside(home(root), relative);
+    const target = inside(home(root), `quarantine/${path.basename(source)}-${crypto.randomUUID()}`);
+    fs.mkdirSync(path.dirname(target), { recursive: true });
+    fs.renameSync(source, target);
+    log(root, `Quarantined ${relative}: ${reason}`);
+}
+function inspectPending(root, state) {
+    const file = inside(home(root), "pending.json");
+    if (!fs.existsSync(file)) return { pending: null, recovered: false };
+    try {
+        const pending = JSON.parse(fs.readFileSync(file, "utf8"));
+        if (!validId(pending?.id)) throw new Error("Invalid pending revision");
+        if (pending.id === state.rejected) throw new Error("Previously rejected revision");
+        if (pending.id === state.active) throw new Error("Revision already active");
+        validateRelease(release(root, pending.id));
+        return { pending, recovered: false };
+    } catch (error) {
+        quarantine(root, "pending.json", error.message);
+        return { pending: null, recovered: true };
+    }
+}
+function stageRelease(root, id, dist) {
+    // Validate the replacement before touching an existing release.
+    validateRelease(dist);
+    const target = release(root, id);
+    if (fs.existsSync(target)) {
+        try { validateRelease(target); return; }
+        catch (error) {
+            const state = read(path.join(home(root), "active.json"));
+            if (!validId(state?.active) || id === state.active || id === state.previous)
+                throw new Error("Cannot replace an active or rollback release");
+            quarantine(root, `releases/${id}`, error.message);
+        }
+    }
+    fs.mkdirSync(path.dirname(target), { recursive: true });
+    fs.renameSync(dist, target);
+}
 function install(root, source, node = process.execPath) {
     root = fs.realpathSync(root);
     const revision = read(path.join(source, ".source-commit.json"))?.sha;
@@ -109,7 +147,7 @@ function choose(root) {
     // Another Discord process can still be using the active version.
     if (alive(state.pid) && state.pid !== process.pid) return state.active;
     const pendingPath = path.join(home(root), "pending.json");
-    const pending = read(pendingPath);
+    const { pending } = inspectPending(root, state);
     if (pending) {
         try {
             validateRelease(release(root, pending.id));
@@ -224,12 +262,14 @@ async function check(root) {
     let work;
     try {
         const state = read(path.join(base, "active.json"));
-        if (!validId(state?.active) || read(path.join(base, "pending.json"))) return;
+        if (!validId(state?.active)) return;
+        const { pending, recovered } = inspectPending(root, state);
+        if (pending) return;
         // active.json is rewritten by the bootstrap on each Discord launch.
         // Scope the cooldown to that launch, including older installed bootstraps.
         const session = `${state.pid}:${fs.statSync(path.join(base, "active.json")).mtimeMs}`;
         const checked = read(path.join(base, "checked.json"));
-        if (checked?.session === session && Date.now() - checked.at < INTERVAL - 5_000) return;
+        if (!recovered && checked?.session === session && Date.now() - checked.at < INTERVAL - 5_000) return;
         write(path.join(base, "checked.json"), { at: Date.now(), session });
         notify(root, "checking");
         const commit = JSON.parse(await download(`https://api.github.com/repos/${REPO}/commits/${BRANCH}`));
@@ -250,9 +290,7 @@ async function check(root) {
         fs.copyFileSync(path.join(source, REQUIRED.at(-1)), path.join(bin, "proton-confgen.exe"));
         fs.copyFileSync(path.join(source, "auto-update.cjs"), path.join(dist, "auto-update.cjs"));
         seal(dist); validateRelease(dist);
-        const target = release(root, sha);
-        if (fs.existsSync(target)) validateRelease(target);
-        else fs.renameSync(dist, target);
+        stageRelease(root, sha, dist);
         write(path.join(base, "pending.json"), { id: sha, preparedAt: Date.now() });
         notify(root, "ready");
         log(root, `Revision ${sha} ready for next Discord launch`);
@@ -262,7 +300,7 @@ async function check(root) {
         fs.rmSync(lock, { force: true });
     }
 }
-module.exports = { notify, install, boot, choose, check, fetchSource, prepareBuild, compile, seal, validateRelease, inside, release, pluginFile };
+module.exports = { notify, install, boot, choose, check, fetchSource, prepareBuild, compile, seal, validateRelease, inside, release, pluginFile, stageRelease };
 if (require.main === module) {
     const [mode, root, source] = process.argv.slice(2);
     if (mode === "--install" && root && source) install(path.resolve(root), path.resolve(source));

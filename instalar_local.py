@@ -18,7 +18,7 @@ from pathlib import Path
 
 SOURCE = Path(__file__).resolve().parent
 REQUIRED = (
-    "manifest.json", "index.tsx", "native.ts", "presence.ts", "stability.ts",
+    "manifest.json", "index.tsx", "native.ts", "presence.ts", "stability.ts", "error-reporter.ts",
     "vpn-controller.ts", "vpn-proton.ts", "vpn-types.ts", "vpn-windows.ts", "auto-update.cjs",
     "bin/win32-x64/proton-confgen.exe",
 )
@@ -28,7 +28,11 @@ INSTALLER_SHA256 = "466d2a0be1f380ddffed052df3cc132125fa34dc1af29312e14f13f358c8
 
 
 def log(message: str):
-    print(message, flush=True)
+    try:
+        print(message, flush=True)
+    except UnicodeEncodeError:
+        encoding = getattr(sys.stdout, "encoding", None) or "utf-8"
+        print(message.encode(encoding, errors="replace").decode(encoding), flush=True)
     if LOG:
         LOG.write(message + "\n")
         LOG.flush()
