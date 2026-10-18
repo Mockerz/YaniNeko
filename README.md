@@ -52,6 +52,8 @@ Se o Discord Stable não for encontrado, o instalador para antes de baixar as fe
 
 ## Dúvidas rápidas
 
+Ao concluir a instalação, a opção **Desativar o UAC deste computador** aparece desmarcada. Marque somente se quiser alterar essa proteção para todo o Windows. A opção solicita autorização de administrador e exige reiniciar o computador; o instalador não reinicia automaticamente. Para reativar, abra `%LOCALAPPDATA%\LefferzinBypass\Reativar-UAC.reg`, autorize e reinicie. Fechar a janela ou deixar a opção desmarcada mantém a configuração existente. Essa opção pertence ao instalador, não às atualizações automáticas do plugin.
+
 - **O plugin não aparece?** Confira se o instalador terminou sem erros e reabra o Discord.
 - **O login falhou?** Confira o usuário, a senha e o código 2FA, se houver.
 - **A conexão não está ativa?** Abra as configurações do plugin, confira a mensagem de status e clique em **Start Bypass**, se necessário.
@@ -61,7 +63,7 @@ Se o Discord Stable não for encontrado, o instalador para antes de baixar as fe
 
 Instale uma vez usando o **novo BypassDiscord.bat** ou **YaniNeko-Installer.exe** da release. Quem já usava uma versão antiga também precisa executar este instalador uma vez. Depois, o plugin verifica novos commits na `main` cerca de 30 segundos após abrir o Discord e a cada 3 horas enquanto ele estiver aberto.
 
-O download fica preso a um único commit, os arquivos são conferidos pelos hashes do GitHub e o Vencord é compilado em uma pasta separada, usando as dependências da instalação. Quando a atualização fica pronta, aparece um aviso e o Discord reinicia automaticamente após cerca de 10 segundos, inclusive durante chamadas e transmissões. O plugin encerra sua VPN antes de reiniciar. Se essa limpeza falhar, adia o reinício e tenta novamente após 1 minuto. Ctrl+R não é necessário.
+O download fica preso a um único commit, os arquivos são conferidos pelos hashes do GitHub e o Vencord é compilado em uma pasta separada, usando as dependências da instalação. Quando a atualização fica pronta, aparece um aviso e o Discord reinicia automaticamente após cerca de 10 segundos, inclusive durante chamadas e transmissões. O plugin encerra sua VPN antes de reiniciar. A partir da V2.3.3, se essa limpeza falhar, suspende o reinício automático dessa atualização para não repetir pedidos de administrador. Recupere a VPN e reinicie o Discord manualmente. Ctrl+R não é necessário.
 
 Se a internet, o GitHub ou a compilação falhar, a versão atual continua funcionando. Uma falha síncrona ao iniciar o novo build restaura a versão anterior para a abertura seguinte. Isso não detecta todos os erros que possam aparecer durante o uso. O atualizador próprio do Vencord fica desativado para não sobrescrever este build personalizado; atualizações da base do Vencord continuam exigindo o instalador.
 
@@ -69,7 +71,7 @@ Para publicar uma alteração do plugin, basta fazer push na `main`. Não precis
 
 O executável é distribuído pela release do GitHub e o BAT valida seu SHA256 antes de executá-lo. Se alterar `instalar_yanineko.py`, recompile `YaniNeko-Installer.exe`, publique-o na release e atualize a URL e o SHA256 em `BypassDiscord.bat` antes do push. O EXE gerado não entra no Git. Alterações apenas no plugin não exigem recompilar o instalador.
 
-O instalador usa sempre a release **4.0.0**. Quando recompilar, substitua o asset `YaniNeko-Installer.exe` nessa mesma release e atualize o SHA256 no BAT; não crie uma nova tag para o instalador. O EXE preparado inclui a correção de saída em consoles Windows com codificação antiga. SHA256 esperado: `FA33C5B4F5E113FF6DB1E605F1BF11401CCE4D361A02C5656B9C369EC953FF06`. A versão do plugin permanece **2.2.9**.
+O instalador usa sempre a release **4.0.0**. Quando recompilar, substitua o asset `YaniNeko-Installer.exe` nessa mesma release e atualize o SHA256 no BAT; não crie uma nova tag para o instalador. O EXE preparado inclui a correção de saída em consoles Windows com codificação antiga. SHA256 esperado: `C3A676FCC1BD5605EE70FCF485B59AB2A4C7952F42536A3A98A7D2FBE65B44DA`. A versão atual do plugin é **2.3.3**.
 
 Logs e estado: `%LOCALAPPDATA%\LefferzinBypass\Vencord\.yanineko-updates`. Conta Proton e configuração da VPN são preservadas. Se uma atualização do próprio Discord remover a injeção do Vencord, será necessário executar o instalador novamente.
 

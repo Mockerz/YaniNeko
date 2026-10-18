@@ -36,7 +36,10 @@ function fixture(result = { success: true }) {
     assert.equal(f.context.quitting, false);
     assert.equal(f.context.restartNotifications[0].phase, "restart_delayed");
     f.time(69999); await f.tick(); assert.equal(f.calls.length, 1);
-    f.time(70000); await f.tick(); assert.equal(f.calls.length, 2);
+    f.time(70000); await f.tick(); assert.equal(f.calls.length, 1);
+    f.time(3600000); await f.tick(); assert.equal(f.calls.length, 1, "failed cleanup must not repeatedly request UAC");
+    f.data.pending.id = "c".repeat(40); await f.tick();
+    f.time(3610000); await f.tick(); assert.equal(f.calls.length, 2, "a new revision may try once");
 
     f = fixture({ success: false, state: "blocked_external" });
     await f.tick(); f.time(10000); await f.tick(); assert.equal(f.calls[1], "relaunch");
@@ -50,5 +53,5 @@ function fixture(result = { success: true }) {
     f = fixture(); await f.tick();
     f.context.controller.shutdown = async () => { f.data.pending = null; return { success: true }; };
     f.time(10000); await f.tick(); assert.equal(f.calls.length, 0); assert.equal(f.context.quitting, false);
-    console.log("PASS: automatic restart delay, VPN cleanup ordering, retry on failure, duplicate prevention, ownership, pending cancellation");
+    console.log("PASS: automatic restart delay, VPN cleanup ordering, no repeated UAC after failure, new revision retry, duplicate prevention, ownership, pending cancellation");
 })().catch(error => { console.error(error); process.exitCode = 1; });
