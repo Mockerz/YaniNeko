@@ -36,12 +36,13 @@ const LOG_FILE = join(VPN_DATA_DIR, "plugin-vpn.log");
 const ROUTE_INFO_FILE = join(VPN_DATA_DIR, "route-info.json");
 const restartNotifications: { id: string; at: number; phase: string }[] = [];
 const ONLINE_COUNTER_URL = "https://problem-important-specimen.ngrok-free.dev";
+const counterDefaultSessionId = randomUUID();
 let counterRequest: Promise<number | null> | null = null;
 let counterLastAttempt = 0;
 let counterValue: number | null = null;
 
-export async function heartbeatOnlineCounter(_: IpcMainInvokeEvent, discordUsername?: unknown): Promise<number | null> {
-    if (!pluginEnabled() || pluginSettings().participateOnlineCounter === false) {
+export async function heartbeatOnlineCounter(_: IpcMainInvokeEvent, discordUsername?: unknown, sessionId?: unknown): Promise<number | null> {
+    if (!pluginEnabled()) {
         counterValue = null;
         return null;
     }
@@ -58,17 +59,24 @@ export async function heartbeatOnlineCounter(_: IpcMainInvokeEvent, discordUsern
                 mkdirSync(VPN_DATA_DIR, { recursive: true });
                 writeFileSync(file, id, { encoding: "utf8", mode: 0o600 });
             }
+            let route: { server: string | null; country: string | null; city: string | null; label: string | null } | null = null;
+            try {
+                const status = await controller.getStatus();
+                const text = (value: unknown) => typeof value === "string" && value.trim() ? value.replace(/[\x00-\x1f\x7f]/g, " ").trim().slice(0, 160) : null;
+                if (status.active) route = { server: text(status.routeId), country: text(status.routeCountry), city: text(status.routeCity), label: text(status.routeLabel) };
+            } catch { /* Route diagnostics are optional for the online counter. */ }
+            const currentSession = typeof sessionId === "string" && /^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/i.test(sessionId) ? sessionId : counterDefaultSessionId;
             const response = await fetch(`${ONLINE_COUNTER_URL}/heartbeat`, {
                 method: "POST", redirect: "error", signal: AbortSignal.timeout(8000),
                 headers: { "Content-Type": "application/json", "ngrok-skip-browser-warning": "1" },
-                body: JSON.stringify({ installationId: id,
+                body: JSON.stringify({ installationId: id, sessionId: currentSession, route,
                     ...(typeof discordUsername === "string" && discordUsername.trim() && discordUsername.length <= 64 && !/[\x00-\x1f\x7f]/.test(discordUsername)
                         ? { username: discordUsername.trim() } : {}) }),
             });
             if (!response.ok) throw new Error("Counter unavailable");
             const result = await response.json();
             if (!Number.isSafeInteger(result?.online) || result.online < 0 || result.online > 100000) throw new Error("Invalid counter");
-            counterValue = pluginSettings().participateOnlineCounter === false ? null : result.online;
+            counterValue = pluginEnabled() ? result.online : null;
         } catch {
             // Optional presence data must not affect the VPN or trigger support reports.
             counterValue = null;
@@ -153,7 +161,7 @@ function extractRouteIdFromProfile(profilePath: string | null): string | null {
 const history: string[] = [];
 const errorReporter = new ErrorReporter({
     webhook: () => "https://discord.com/api/webhooks/1538439935651225712/CZ69XouZLYXgOigEVSPwfMnpzmNbJf8Ipe2hvjdFl5Eb7NlVrTWSsAnSyxu692L9I0vP",
-    enabled: () => pluginSettings().automaticErrorReports !== false,
+    enabled: () => true,
     version: manifest.version,
     diagnostic: () => {
         let detail = history.join("\n");
