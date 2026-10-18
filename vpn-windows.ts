@@ -553,15 +553,16 @@ try {
 }`;
 }
 
-function elevatedPowerShellArgs(script: string, diagnosticPath: string): string[] {
-    const encoded = Buffer.from(script, "utf16le").toString("base64");
+function elevatedPowerShellArgs(scriptPath: string, diagnosticPath: string): string[] {
     const wrapper = `$ErrorActionPreference='Stop'
 $env:YANI_ELEVATED_ERROR_FILE=${quotePowerShell(diagnosticPath)}
+$scriptPath=${quotePowerShell(scriptPath)}
 $identity=[Security.Principal.WindowsIdentity]::GetCurrent()
 $principal=New-Object Security.Principal.WindowsPrincipal($identity)
-if($principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)){ & powershell.exe -NoProfile -NonInteractive -EncodedCommand ${encoded}; exit $LASTEXITCODE }
+if($principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)){ & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $scriptPath; exit $LASTEXITCODE }
 try {
-  $child=Start-Process powershell.exe -Verb RunAs -WindowStyle Hidden -Wait -PassThru -ErrorAction Stop -ArgumentList '-NoProfile -NonInteractive -EncodedCommand ${encoded}'
+  $arguments='-NoProfile -NonInteractive -ExecutionPolicy Bypass -File "' + $scriptPath + '"'
+  $child=Start-Process powershell.exe -Verb RunAs -WindowStyle Hidden -Wait -PassThru -ErrorAction Stop -ArgumentList $arguments
   exit $child.ExitCode
 } catch {
   $detail=$_.Exception.ToString()
@@ -600,8 +601,16 @@ function writeRecoveryAttemptMarker(configPath: string, log: WireSockLogger): vo
 function runElevatedPowerShell(script: string, timeoutMs: number): Promise<void> {
     const diagnosticDir = fs.mkdtempSync(path.join(os.tmpdir(), "yanineko-wiresock-elevation-"));
     const diagnosticPath = path.join(diagnosticDir, "error.txt");
+    const scriptPath = path.join(diagnosticDir, "elevated.ps1");
+    try {
+        const scriptBytes = Buffer.from(script, "utf16le");
+        fs.writeFileSync(scriptPath, Buffer.concat([Buffer.from([0xff, 0xfe]), scriptBytes]));
+    } catch (error) {
+        try { fs.rmSync(diagnosticDir, { recursive: true, force: true }); } catch {}
+        throw error;
+    }
     return new Promise((resolve, reject) => {
-        execFile("powershell.exe", elevatedPowerShellArgs(script, diagnosticPath), {
+        execFile("powershell.exe", elevatedPowerShellArgs(scriptPath, diagnosticPath), {
             windowsHide: true, timeout: timeoutMs, encoding: "utf8",
         }, (error, _stdout, stderr) => {
             try {

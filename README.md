@@ -71,11 +71,11 @@ Para publicar uma alteração do plugin, basta fazer push na `main`. Não precis
 
 O executável é distribuído pela release do GitHub e o BAT valida seu SHA256 antes de executá-lo. Se alterar `instalar_yanineko.py`, recompile `YaniNeko-Installer.exe`, publique-o na release e atualize a URL e o SHA256 em `BypassDiscord.bat` antes do push. O EXE gerado não entra no Git. Alterações apenas no plugin não exigem recompilar o instalador.
 
-O instalador usa sempre a release **4.0.0**. Quando recompilar, substitua o asset `YaniNeko-Installer.exe` nessa mesma release e atualize o SHA256 único no BAT; não crie uma nova tag para o instalador. O EXE preparado inclui a correção de saída em consoles Windows com codificação antiga. SHA256 do build atual: `D87587548DF398453FBE980357A903D9D7179E9C4D07A95B476974A1B508E582`. A versão atual do plugin é **2.3.6**.
+O instalador usa sempre a release **4.0.0**. Quando recompilar, substitua o asset `YaniNeko-Installer.exe` nessa mesma release e atualize o SHA256 único no BAT; não crie uma nova tag para o instalador. O EXE preparado inclui a correção de saída em consoles Windows com codificação antiga. SHA256 do build atual: `D87587548DF398453FBE980357A903D9D7179E9C4D07A95B476974A1B508E582`. A versão atual do plugin é **2.3.7**.
 
 Logs e estado: `%LOCALAPPDATA%\LefferzinBypass\Vencord\.yanineko-updates`. Conta Proton e configuração da VPN são preservadas. Se uma atualização do próprio Discord remover a injeção do Vencord, será necessário executar o instalador novamente.
 
-Na V2.3.6, o serviço WireSock recebe as ações de recuperação do Windows para reiniciar após uma falha inesperada. O plugin também monitora o serviço e agenda novas tentativas com intervalo crescente quando a VPN cai. Uma autorização de administrador cancelada ou negada interrompe as tentativas para evitar abrir vários pedidos de UAC; nesse caso, é necessário autorizar a próxima ativação. O Windows não permite que um aplicativo contorne essa autorização com segurança.
+Na V2.3.7, o PowerShell elevado executa o script por arquivo temporário, evitando limites de tamanho da linha de comando. O serviço WireSock recebe ações de recuperação do Windows e o plugin agenda novas tentativas quando a VPN cai. Se a autorização de administrador for cancelada ou negada, as tentativas param para não abrir vários pedidos de UAC; é necessário autorizar a próxima ativação. O Windows não permite contornar essa autorização com segurança.
 
 A partir da V2.2.8, marcadores de atualização inválidos e builds preparados corrompidos são movidos para a subpasta `quarantine`, com o motivo registrado em `updater.log`. O atualizador pode preparar outra cópia sem ficar preso à tentativa anterior. As versões ativa e de retorno não são substituídas por essa recuperação.
 
