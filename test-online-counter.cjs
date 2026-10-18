@@ -15,14 +15,17 @@ const transform = source => esbuild.transformSync(source, { loader: "ts", format
         readFileSync: () => saved, writeFileSync: (_, value) => { saved = value; },
         randomUUID: () => "12345678-1234-4123-8123-123456789abc",
         fetch: async (_, options) => {
-            calls++; assert.deepEqual(Object.keys(JSON.parse(options.body)), ["installationId"]);
+            calls++;
+            const payload = JSON.parse(options.body);
+            assert.ok(Object.keys(payload).every(key => ["installationId", "username"].includes(key)));
+            if (calls === 1) assert.equal(payload.username, "joao123");
             assert.equal(options.headers["ngrok-skip-browser-warning"], "1");
             if (fail) throw Error("offline");
             return { ok: true, json: async () => ({ online: 12 }) };
         }
     });
     const heartbeat = mod.exports.heartbeatOnlineCounter;
-    assert.equal(await heartbeat(), 12); assert.equal(await heartbeat(), 12); assert.equal(calls, 1);
+    assert.equal(await heartbeat(null, "joao123"), 12); assert.equal(await heartbeat(), 12); assert.equal(calls, 1);
     now += 60000; await Promise.all([heartbeat(), heartbeat()]); assert.equal(calls, 2);
     optedOut = true; assert.equal(await heartbeat(), null); assert.equal(calls, 2);
     optedOut = false; enabled = false; assert.equal(await heartbeat(), null);
@@ -41,11 +44,13 @@ const transform = source => esbuild.transformSync(source, { loader: "ts", format
     });
     const p = presenceMod.exports;
     p.updateOnlineUsers(12); p.startPresence(); await new Promise(setImmediate);
-    assert.match(activity.at(-1).details, /12 usuários online/);
-    p.updateOnlineUsers(null); await new Promise(setImmediate); assert.ok(!activity.at(-1).details.includes("online"));
-    p.updateOnlineUsers(1); await new Promise(setImmediate); assert.match(activity.at(-1).details, /1 usuário online/);
+    assert.match(activity.at(-1).state, /12 usuários online/);
+    assert.equal(activity.at(-1).details, "Bypass de Tela/Cam - Vtest");
+    assert.ok(!activity.at(-1).state.includes("github.com"));
+    p.updateOnlineUsers(null); await new Promise(setImmediate); assert.equal(activity.at(-1).state, "Contador indisponível");
+    p.updateOnlineUsers(1); await new Promise(setImmediate); assert.match(activity.at(-1).state, /1 usuário online/);
     now += 180001; p.updateRouteInfo("server", "BR", null, 10); await new Promise(setImmediate);
-    assert.ok(!activity.at(-1).details.includes("online"));
+    assert.ok(!activity.at(-1).state.includes("online"));
     p.stopPresence(); assert.equal(activity.at(-1), null);
     console.log("PASS client and presence: heartbeat cooldown, stable anonymous ID, opt-out, offline handling, real count display and stale count removal");
 })().catch(error => { console.error(error); process.exitCode = 1; });

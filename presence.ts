@@ -9,7 +9,6 @@ import { version } from "./manifest.json";
 const APPLICATION_ID = "1545534815468658789";
 const SOCKET_ID = "LefferzinBypass";
 const ACTIVITY_NAME = "Leffer (˶>⩊<˶)";
-const PRESENCE_PREFIX = "github.com/Mockerz/YaniNeko";
 
 // O nome deve ser exatamente a chave exibida em Developer Portal > Rich Presence > Art Assets.
 // O Discord transforma as chaves para minúsculas.
@@ -59,7 +58,9 @@ async function buildActivity(): Promise<Activity> {
     const start = discordPresenceStartedAt ?? Date.now();
     const largeImage = await resolveLargeImage();
 
-    let stateText = PRESENCE_PREFIX;
+    let stateText = onlineUsers !== null && Date.now() - onlineUsersUpdatedAt < 180000
+        ? `${onlineUsers} ${onlineUsers === 1 ? "usuário online" : "usuários online"}`
+        : "Contador indisponível";
     const parts: string[] = [];
     if (currentCountry) parts.push(currentCountry.toUpperCase());
     if (currentCity) parts.push(currentCity.toUpperCase());
@@ -72,7 +73,7 @@ async function buildActivity(): Promise<Activity> {
         application_id: APPLICATION_ID,
         name: ACTIVITY_NAME,
         type: ActivityType.PLAYING,
-        details: `Bypass de Tela/Cam - V${version}${onlineUsers !== null && Date.now() - onlineUsersUpdatedAt < 180000 ? ` • ${onlineUsers} ${onlineUsers === 1 ? "usuário online" : "usuários online"}` : ""}`,
+        details: `Bypass de Tela/Cam - V${version}`,
         state: stateText,
         buttons: ["Baixar o Bypass", "Tutorial"],
         metadata: {

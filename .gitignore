@@ -25,3 +25,4 @@ __pycache__/
 *.spec
 
 /YaniNeko-Installer.exe
+server/.server-data/

@@ -151,7 +151,7 @@ function startOnlineCounter(isCurrent: () => boolean): void {
     const poll = async () => {
         if (!isCurrent()) return;
         try {
-            const online = await Native?.heartbeatOnlineCounter?.();
+            const online = await Native?.heartbeatOnlineCounter?.(UserStore.getCurrentUser()?.username);
             if (isCurrent()) updateOnlineUsers(typeof online === "number" ? online : null);
         } catch { if (isCurrent()) updateOnlineUsers(null); }
     };
@@ -309,7 +309,7 @@ function AboutPlugin() {
 const settings = definePluginSettings({
     participateOnlineCounter: {
         type: OptionType.BOOLEAN,
-        description: "Participar do contador online mostrado na presença: envia um identificador aleatório da instalação ao servidor Yani Neko a cada minuto, sem nome ou ID do Discord.",
+        description: "Participar do contador online: envia um identificador da instalação e seu nome de usuário do Discord a cada minuto. O nome aparece somente no painel privado do administrador; a presença mostra apenas a quantidade.",
         default: true
     },
     automaticErrorReports: {
