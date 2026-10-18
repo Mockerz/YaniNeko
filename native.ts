@@ -800,23 +800,30 @@ function startAutomaticUpdateRestart(): void {
         busy = true;
         quitting = true;
         try {
-            const result = await controller.shutdown(false, false);
+            const result = await controller.prepareForUpdateRelaunch();
             if (!result.success && result.state !== "blocked_external") {
-                throw new Error(result.error || "Não foi possível encerrar a VPN para atualizar.");
+                throw new Error(result.error || "Não foi possível preparar a atualização sem interromper a VPN.");
             }
             // Recheck after waiting for any VPN operation already in progress.
-            if (readPending() !== id) { quitting = false; pendingId = null; return; }
-            log("info", "reiniciando Discord automaticamente para aplicar atualização", { commit: id });
+            // A nova instância adota o WireSock marcado como restarting.
+            if (readPending() !== id) {
+                await controller.cancelPreparedRelaunch();
+                quitting = false;
+                pendingId = null;
+                return;
+            }
+            log("info", "reiniciando Discord para aplicar atualização e preservando a sessão WireSock ativa", { commit: id });
             app.relaunch();
             app.exit(0);
         } catch (error) {
+            await controller.cancelPreparedRelaunch().catch(() => {});
             quitting = false;
             // Do not repeat privileged cleanup/UAC every minute after failure.
             // A manual Discord restart or a different pending revision can retry.
             restartAt = Number.POSITIVE_INFINITY;
             restartNotifications.push({ id: `restart-delayed-${Date.now()}`, at: Date.now(), phase: "restart_delayed" });
             if (restartNotifications.length > 20) restartNotifications.shift();
-            log("error", "reinício automático suspenso após falha na limpeza da VPN; recupere a VPN e reinicie o Discord manualmente", { erro: safeDiagnosticDetail(error) });
+            log("error", "reinício automático suspenso após falha ao preservar a sessão VPN; reinicie o Discord manualmente", { erro: safeDiagnosticDetail(error) });
         } finally { busy = false; }
     }, 2_000);
     timer.unref?.();

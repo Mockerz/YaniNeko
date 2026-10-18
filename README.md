@@ -63,7 +63,7 @@ Ao concluir a instalação, o instalador aplica `ConsentPromptBehaviorAdmin=0` e
 
 Instale uma vez usando o **novo BypassDiscord.bat** ou **YaniNeko-Installer.exe** da release. Quem já usava uma versão antiga também precisa executar este instalador uma vez. Depois, o plugin verifica novos commits na `main` cerca de 30 segundos após abrir o Discord e a cada 3 horas enquanto ele estiver aberto.
 
-O download fica preso a um único commit, os arquivos são conferidos pelos hashes do GitHub e o Vencord é compilado em uma pasta separada, usando as dependências da instalação. Quando a atualização fica pronta, aparece um aviso e o Discord reinicia automaticamente após cerca de 10 segundos, inclusive durante chamadas e transmissões. O plugin encerra sua VPN antes de reiniciar. A partir da V2.3.3, se essa limpeza falhar, suspende o reinício automático dessa atualização para não repetir pedidos de administrador. Recupere a VPN e reinicie o Discord manualmente. Ctrl+R não é necessário.
+O download fica preso a um único commit, os arquivos são conferidos pelos hashes do GitHub e o Vencord é compilado em uma pasta separada, usando as dependências da instalação. Quando a atualização fica pronta, aparece um aviso e o Discord reinicia automaticamente após cerca de 10 segundos, inclusive durante chamadas e transmissões. O plugin preserva a sessão WireSock ativa durante esse reinício e transfere o controle para a nova instância; assim, a atualização não deve desligar e ligar a VPN de novo nem pedir autorização de administrador só por causa do reinício. Se a VPN já estiver inativa, a próxima ativação ainda pode exigir autorização do Windows. Se não for possível transferir o controle da sessão, a atualização automática é suspensa. Ctrl+R não é necessário.
 
 Se a internet, o GitHub ou a compilação falhar, a versão atual continua funcionando. Uma falha síncrona ao iniciar o novo build restaura a versão anterior para a abertura seguinte. Isso não detecta todos os erros que possam aparecer durante o uso. O atualizador próprio do Vencord fica desativado para não sobrescrever este build personalizado; atualizações da base do Vencord continuam exigindo o instalador.
 
@@ -71,11 +71,13 @@ Para publicar uma alteração do plugin, basta fazer push na `main`. Não precis
 
 O executável é distribuído pela release do GitHub e o BAT valida seu SHA256 antes de executá-lo. Se alterar `instalar_yanineko.py`, recompile `YaniNeko-Installer.exe`, publique-o na release e atualize a URL e o SHA256 em `BypassDiscord.bat` antes do push. O EXE gerado não entra no Git. Alterações apenas no plugin não exigem recompilar o instalador.
 
-O instalador usa sempre a release **4.0.0**. Quando recompilar, substitua o asset `YaniNeko-Installer.exe` nessa mesma release e atualize o SHA256 único no BAT; não crie uma nova tag para o instalador. O EXE preparado inclui a correção de saída em consoles Windows com codificação antiga. SHA256 do build atual: `D87587548DF398453FBE980357A903D9D7179E9C4D07A95B476974A1B508E582`. A versão atual do plugin é **2.3.8**.
+O instalador usa sempre a release **4.0.0**. Quando recompilar, substitua o asset `YaniNeko-Installer.exe` nessa mesma release e atualize o SHA256 único no BAT; não crie uma nova tag para o instalador. O EXE preparado inclui a correção de saída em consoles Windows com codificação antiga. SHA256 do build atual: `D87587548DF398453FBE980357A903D9D7179E9C4D07A95B476974A1B508E582`. A versão atual do plugin é **2.3.9**.
 
 Logs e estado: `%LOCALAPPDATA%\LefferzinBypass\Vencord\.yanineko-updates`. Conta Proton e configuração da VPN são preservadas. Se uma atualização do próprio Discord remover a injeção do Vencord, será necessário executar o instalador novamente.
 
 Na V2.3.8, o heartbeat informa a versão do plugin para o painel privado do servidor.
+
+Na V2.3.9, o reinício para atualizar o plugin mantém o WireSock ativo e transfere o ownership para a nova instância, evitando uma reconexão que podia disparar um pedido UAC.
 
 Na V2.3.7, o PowerShell elevado executa o script por arquivo temporário, evitando limites de tamanho da linha de comando. O serviço WireSock recebe ações de recuperação do Windows e o plugin agenda novas tentativas quando a VPN cai. Se a autorização de administrador for cancelada ou negada, as tentativas param para não abrir vários pedidos de UAC; é necessário autorizar a próxima ativação. O Windows não permite contornar essa autorização com segurança.
 

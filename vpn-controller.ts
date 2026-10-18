@@ -316,6 +316,72 @@ export class PluginVpnController {
     }
 
     /**
+     * Prepara a troca de build sem derrubar uma sessão WireSock ativa.
+     * O owner marcado como restarting permite que a instância nova adote o
+     * serviço antes que o watchdog da instância antiga considere o Discord morto.
+     */
+    public prepareForUpdateRelaunch(): Promise<VpnOperationResult> {
+        return this.serial(async () => {
+            await this.initialize();
+            if (this.restarting) return { success: true, state: "restart_pending", message: "Reinício já preparado." };
+
+            const inspection = await windows.inspectWireSockAsync(this.serviceConfigPath);
+            if (inspection.active && inspection.owned) {
+                const previousOwner = this.readOwner();
+                if (previousOwner && previousOwner.pid !== process.pid && processAlive(previousOwner.pid) && !previousOwner.restarting) {
+                    return {
+                        success: false,
+                        state: "recovery_required",
+                        error: "Outra instância ainda controla a sessão WireSock; atualização automática adiada.",
+                    };
+                }
+
+                this.generation = Math.max(this.generation, previousOwner?.generation ?? 0);
+                this.adoptOwnership(previousOwner, inspection);
+                const owner = this.readOwner();
+                if (owner) {
+                    owner.pid = process.pid;
+                    owner.restarting = true;
+                    this.writeOwner(owner);
+                }
+                this.state = "active";
+                this.discordPid = process.pid;
+                this.externalReason = null;
+                this.options.log("info", "preparando atualização sem interromper a sessão WireSock própria", { generation: this.generation });
+            } else if (inspection.active) {
+                this.options.log("warn", "WireSock externo preservado durante o reinício de atualização");
+            } else {
+                const owner = this.readOwner();
+                if (owner?.pid === process.pid) {
+                    owner.restarting = true;
+                    this.writeOwner(owner);
+                }
+                this.options.log("info", "preparando atualização; WireSock próprio já está inativo");
+            }
+
+            this.stopWatchdog();
+            this.restarting = true;
+            return { success: true, state: "restart_pending", message: "Reinício de atualização preparado." };
+        });
+    }
+
+    /** Desfaz a preparação se a atualização mudar ou o Discord não reiniciar. */
+    public cancelPreparedRelaunch(): Promise<void> {
+        return this.serial(async () => {
+            if (!this.restarting) return;
+            this.restarting = false;
+            const owner = this.readOwner();
+            if (owner?.pid === process.pid && owner.restarting) {
+                owner.restarting = false;
+                this.writeOwner(owner);
+            }
+            if (this.state === "active") this.startWatchdog();
+            else if (this.state === "recovery_required") this.scheduleRecovery(0);
+            this.options.log("warn", "preparação do reinício de atualização cancelada; controle da VPN restaurado");
+        });
+    }
+
+    /**
      * Limpeza global destrutiva. Só deve ser chamada por uma ação explícita de
      * recuperação; encerramento normal e logout usam shutdown(false, false).
      */
