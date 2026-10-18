@@ -209,17 +209,24 @@ interface WireSockSnapshot {
     processes: Array<{ ProcessId: number; CommandLine: string | null }>;
 }
 
+export function parseWireSockSnapshot(output: string): WireSockSnapshot {
+    // Only parse our framed record; PowerShell startup/shutdown messages are not JSON.
+    const records = output.replace(/^\uFEFF/, "").split(/\r?\n/).filter(line => line.startsWith("YANI_WIRESOCK="));
+    if (records.length !== 1) throw new Error("Consulta WireSock sem resposta única válida.");
+    return JSON.parse(records[0].slice("YANI_WIRESOCK=".length));
+}
+
 export async function inspectWireSockAsync(configPath?: string): Promise<WireSockInspection> {
     if (!isWindows()) return inspectWireSock(configPath);
     if (!pendingInspection) {
-        const script = `$ErrorActionPreference='Stop'; $services=@(Get-CimInstance Win32_Service -Filter "Name='wiresock-client-service' OR Name='wiresock-pro-client-service'" | Select-Object Name,State,PathName); $processes=@(Get-CimInstance Win32_Process -Filter "Name='wiresock-client.exe'" | Select-Object ProcessId,CommandLine); @{services=$services;processes=$processes} | ConvertTo-Json -Depth 4 -Compress`;
+        const script = `$ErrorActionPreference='Stop'; $ProgressPreference='SilentlyContinue'; $services=@(Get-CimInstance Win32_Service -Filter "Name='wiresock-client-service' OR Name='wiresock-pro-client-service'" | Select-Object Name,State,PathName); $processes=@(Get-CimInstance Win32_Process -Filter "Name='wiresock-client.exe'" | Select-Object ProcessId,CommandLine); $json=(@{services=$services;processes=$processes} | ConvertTo-Json -Depth 4 -Compress); [Console]::WriteLine('YANI_WIRESOCK=' + $json)`;
         pendingInspection = new Promise<WireSockSnapshot>((resolve, reject) => {
             execFile("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", script], {
                 encoding: "utf8", windowsHide: true, timeout: 10_000, maxBuffer: 1024 * 1024,
-            }, (error, stdout) => {
-                if (error) return reject(error);
+            }, (error, stdout, stderr) => {
+                if (error) return reject(new Error(`Consulta WireSock falhou: code=${error.code ?? "unknown"} killed=${error.killed} signal=${error.signal ?? "none"}; ${safeDiagnosticDetail(stderr || error.message, 600)}`));
                 try {
-                    const snapshot = JSON.parse(stdout) as WireSockSnapshot;
+                    const snapshot = parseWireSockSnapshot(stdout);
                     if (!Array.isArray(snapshot.services) || !Array.isArray(snapshot.processes))
                         throw new Error("Resposta inválida ao consultar WireSock.");
                     // Estado transitório ou resposta parcial não comprovam queda.

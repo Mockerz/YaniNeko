@@ -29,7 +29,7 @@ CURRENT_STEP = "Verificando requisitos"
 INSTALLER_URL = "https://github.com/Vencord/Installer/releases/download/v1.4.0/VencordInstallerCli.exe"
 INSTALLER_SHA256 = "466d2a0be1f380ddffed052df3cc132125fa34dc1af29312e14f13f358c8d2a2"
 REQUIRED = [
-    "manifest.json", "index.tsx", "native.ts", "presence.ts", "stability.ts", "error-reporter.ts",
+    "manifest.json", "index.tsx", "native.ts", "presence.ts", "stability.ts", "error-reporter.ts", "device-client.ts",
     "vpn-controller.ts", "vpn-proton.ts", "vpn-types.ts", "vpn-windows.ts", "auto-update.cjs",
 ]
 

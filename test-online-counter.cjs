@@ -5,22 +5,22 @@ const vm = require("node:vm");
 const esbuild = require(path.join(process.env.LOCALAPPDATA, "LefferzinBypass/Vencord/node_modules/esbuild"));
 const transform = source => esbuild.transformSync(source, { loader: "ts", format: "cjs" }).code;
 (async () => {
-    let now = 1000000, enabled = true, fail = false, calls = 0, saved = "";
+    let now = 1000000, enabled = true, fail = false, calls = 0, saved = "", hangStatus = false;
     const native = fs.readFileSync(path.join(__dirname, "native.ts"), "utf8");
     const mod = { exports: {} };
     vm.runInNewContext(transform(native.slice(native.indexOf("const ONLINE_COUNTER_URL"), native.indexOf("export function getAutoUpdateNotifications"))), {
         module: mod, exports: mod.exports, Date: { now: () => now }, AbortSignal,
+        log() {}, safeDiagnosticDetail: String,
         pluginEnabled: () => enabled, pluginSettings: () => ({ participateOnlineCounter: false }),
         join: path.join, VPN_DATA_DIR: "test", mkdirSync() {},
         readFileSync: () => saved, writeFileSync: (_, value) => { saved = value; },
         randomUUID: () => "12345678-1234-4123-8123-123456789abc",
-        controller: { getStatus: async () => ({ active: true, routeId: "BR-1", routeCountry: "BR", routeCity: "Sao Paulo", routeLabel: "BR-1 · Sao Paulo", configPath: "private-config" }) },
+        controller: { getStatus: async () => hangStatus ? new Promise(() => {}) : ({ active: true, routeId: "BR-1", routeCountry: "BR", routeCity: "Sao Paulo", routeLabel: "BR-1 · Sao Paulo", configPath: "private-config" }) },
         fetch: async (_, options) => {
             calls++;
             const payload = JSON.parse(options.body);
             assert.ok(Object.keys(payload).every(key => ["installationId", "username", "sessionId", "route"].includes(key)));
-            assert.equal(payload.route.server, "BR-1");
-            assert.equal(payload.route.country, "BR");
+            if (payload.route) { assert.equal(payload.route.server, "BR-1"); assert.equal(payload.route.country, "BR"); }
             assert.ok(!options.body.includes("private-config"));
             assert.equal(payload.sessionId, "12345678-1234-4123-8123-123456789abc");
             if (calls === 1) assert.equal(payload.username, "joao123");
@@ -32,8 +32,14 @@ const transform = source => esbuild.transformSync(source, { loader: "ts", format
     const heartbeat = mod.exports.heartbeatOnlineCounter;
     assert.equal(await heartbeat(null, "joao123"), 12); assert.equal(await heartbeat(), 12); assert.equal(calls, 1);
     now += 60000; await Promise.all([heartbeat(), heartbeat()]); assert.equal(calls, 2);
-    enabled = false; assert.equal(await heartbeat(), null); assert.equal(calls, 2);
+    fail = true; now += 30000; assert.equal(await heartbeat(), 12, "transient failure retains recent count");
+    now += 180000; assert.equal(await heartbeat(), null, "expired count is removed");
+    fail = false; now += 30000; assert.equal(await heartbeat(), 12);
+    const beforeDisable = calls;
+    enabled = false; assert.equal(await heartbeat(), null); assert.equal(calls, beforeDisable);
     enabled = true; fail = true; now += 60000; assert.equal(await heartbeat(), null);
+    fail = false; hangStatus = true; now += 30000;
+    assert.equal(await heartbeat(), 12, "hung VPN status must not block heartbeat");
     const activity = [], presenceMod = { exports: {} };
     vm.runInNewContext(transform(fs.readFileSync(path.join(__dirname, "presence.ts"), "utf8")), {
         module: presenceMod, exports: presenceMod.exports, Date: { now: () => now },
