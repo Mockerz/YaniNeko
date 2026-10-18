@@ -418,7 +418,7 @@ def main() -> int:
         inject(vencord)
         step("Configurando atualizações automáticas")
         run([shutil.which("node"), str(plugin_source / "auto-update.cjs"), "--install", str(vencord), str(plugin_source)], cwd=vencord)
-        configure_optional_uac(root, silent="--disable-uac" in sys.argv)
+        configure_optional_uac(root)
         step("[8/8] Finalização")
         log("INSTALAÇÃO CONCLUÍDA.")
         log("Abra o Discord e ative LefferzinBypass em Configurações > Plugins.")
@@ -434,86 +434,59 @@ def main() -> int:
             LOGGER = None
 
 
-def ask_disable_uac() -> bool:
-    """Closing the dialog, leaving it unchecked or UI failure preserves UAC."""
-    import tkinter as tk
-    from tkinter import ttk
-    window = tk.Tk()
-    window.title("YaniNeko — Opção do Windows")
-    window.resizable(False, False)
-    frame = ttk.Frame(window, padding=24)
-    frame.pack()
-    ttk.Label(frame, text="Instalação concluída", font=("Segoe UI", 14, "bold")).pack(anchor="w")
-    ttk.Label(frame, wraplength=480, text="Você pode manter a proteção padrão do Windows e concluir normalmente.\n\n"
-              "Desativar o Controle de Conta de Usuário (UAC) reduz a proteção de todo o Windows, "
-              "não apenas da VPN. A alteração exige permissão de administrador e só entra em vigor "
-              "após reiniciar o computador. Não reiniciaremos automaticamente.").pack(anchor="w", pady=14)
-    selected = tk.BooleanVar(value=False)
-    ttk.Checkbutton(frame, text="Desativar o UAC deste computador (não recomendado)", variable=selected).pack(anchor="w")
-    answer = False
-    def finish():
-        nonlocal answer
-        answer = selected.get() is True
-        window.destroy()
-    ttk.Button(frame, text="Concluir", command=finish).pack(anchor="e", pady=(20, 0))
-    window.protocol("WM_DELETE_WINDOW", window.destroy)
-    window.mainloop()
-    return answer
-
-
-def disable_uac(root: Path, silent: bool = False):
-    # Fixed, narrow command; do not elevate the full installer or switch its user.
+def disable_uac(root: Path):
+    # Only update the requested consent settings; do not elevate the full installer
+    # or switch its user, so Discord remains associated with the current account.
     import winreg
     key_path = r"SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System"
     with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, key_path, 0, winreg.KEY_READ | winreg.KEY_WOW64_64KEY) as key:
-        current, _ = winreg.QueryValueEx(key, "EnableLUA")
-    if current == 0:
-        log("UAC já está configurado como desativado. Pode ser necessário reiniciar o Windows.")
+        current_admin_prompt, admin_kind = winreg.QueryValueEx(key, "ConsentPromptBehaviorAdmin")
+        current_secure_desktop, desktop_kind = winreg.QueryValueEx(key, "PromptOnSecureDesktop")
+    if admin_kind != winreg.REG_DWORD or desktop_kind != winreg.REG_DWORD:
+        raise RuntimeError("As configurações atuais do UAC não são valores DWORD conhecidos.")
+    if current_admin_prompt == 0 and current_secure_desktop == 0:
+        log("As configurações solicitadas do UAC já estão aplicadas. Pode ser necessário reiniciar o Windows.")
         return
+
     restore = root / "Reativar-UAC.reg"
+    configure = root / "Configurar-UAC.reg"
     restore.write_text('Windows Registry Editor Version 5.00\n\n'
                        '[HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Policies\\System]\n'
-                       '"EnableLUA"=dword:00000001\n', encoding="utf-16")
-    script = ("$ErrorActionPreference='Stop'; "
+                       f'"ConsentPromptBehaviorAdmin"=dword:{current_admin_prompt:08x}\n'
+                       f'"PromptOnSecureDesktop"=dword:{current_secure_desktop:08x}\n', encoding="utf-16")
+    configure.write_text('Windows Registry Editor Version 5.00\n\n'
+                         '[HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Policies\\System]\n'
+                         '"ConsentPromptBehaviorAdmin"=dword:00000000\n'
+                         '"PromptOnSecureDesktop"=dword:00000000\n', encoding="utf-16")
+    # The standard Windows elevation prompt is retained for this narrowly scoped change.
+    ps_path = "'" + str(configure).replace("'", "''") + "'"
+    script = ("$regPath=" + ps_path + "; "
               "$p=Start-Process -FilePath ($env:SystemRoot+'\\System32\\reg.exe') "
-              "-ArgumentList @('ADD','HKLM\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Policies\\System',"
-              "'/v','EnableLUA','/t','REG_DWORD','/d','0','/f','/reg:64') "
-              "-Verb RunAs -WindowStyle Hidden -Wait -PassThru; exit $p.ExitCode")
+              "-ArgumentList ('IMPORT \"'+$regPath+'\" /reg:64') "
+              "-Verb RunAs -WindowStyle Hidden -Wait -PassThru; "
+              "if($null -eq $p){ exit 1223 }; exit $p.ExitCode")
     powershell = str(Path(os.environ.get("SystemRoot", r"C:\Windows")) / "System32/WindowsPowerShell/v1.0/powershell.exe")
-    result = subprocess.run([powershell, "-NoProfile", "-NonInteractive", "-Command", script],
-                            capture_output=True, timeout=120, creationflags=subprocess.CREATE_NO_WINDOW)
+    try:
+        result = subprocess.run([powershell, "-NoProfile", "-NonInteractive", "-Command", script],
+                                capture_output=True, timeout=120, creationflags=subprocess.CREATE_NO_WINDOW)
+    finally:
+        configure.unlink(missing_ok=True)
     if result.returncode != 0:
         raise RuntimeError("A autorização foi cancelada ou o Windows recusou a alteração do UAC.")
     with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, key_path, 0, winreg.KEY_READ | winreg.KEY_WOW64_64KEY) as key:
-        if winreg.QueryValueEx(key, "EnableLUA")[0] != 0:
-            raise RuntimeError("O Windows não confirmou a alteração do UAC.")
-    message = f"UAC configurado como desativado por escolha do usuário. Reinicie o computador para aplicar.\nPara reativar, abra {restore} e reinicie novamente."
-    log(message)
-    if not silent:
-        import ctypes
-        ctypes.windll.user32.MessageBoxW(None, message, "YaniNeko — Reinicialização necessária", 0x40)
+        admin_prompt = winreg.QueryValueEx(key, "ConsentPromptBehaviorAdmin")[0]
+        secure_desktop = winreg.QueryValueEx(key, "PromptOnSecureDesktop")[0]
+    if admin_prompt != 0 or secure_desktop != 0:
+        raise RuntimeError("O Windows não confirmou as alterações solicitadas do UAC.")
+    log(f"Preferências do UAC configuradas. Reinicie o computador para aplicar. Para reverter, abra {restore} e reinicie.")
 
 
-def configure_optional_uac(root: Path, silent: bool = False):
+def configure_optional_uac(root: Path):
     try:
-        if silent:
-            log("Opção --disable-uac solicitada: alterando o UAC sem diálogos do instalador. Reinício do Windows necessário.")
-            disable_uac(root, silent=True)
-            return
-        if not ask_disable_uac():
-            log("Configuração do UAC mantida; opção de desativação não confirmada.")
-            return
         disable_uac(root)
     except Exception as exc:
-        # This optional action must not invalidate an otherwise successful install.
-        log(f"Instalação concluída, mas a opção de UAC não foi aplicada/confirmada: {exc}")
-        if silent:
-            return
-        try:
-            import ctypes
-            ctypes.windll.user32.MessageBoxW(None, "A instalação foi concluída, mas não foi possível confirmar a alteração do UAC. Consulte o log.", "YaniNeko", 0x30)
-        except Exception:
-            pass
+        # A cancelled elevation prompt must not invalidate the plugin installation.
+        log(f"Instalação concluída, mas as preferências do UAC não foram aplicadas/confirmadas: {exc}")
 
 
 if __name__ == "__main__":

@@ -5,6 +5,7 @@
  */
 
 import { RendererSettings } from "@main/settings";
+import { spawn } from "child_process";
 import { randomUUID } from "crypto";
 import { app, BrowserWindow, ipcMain, type IpcMainEvent, type IpcMainInvokeEvent } from "electron";
 import {
@@ -47,8 +48,68 @@ let counterRoute: { server: string | null; country: string | null; city: string 
 let counterRouteBusy = false;
 let counterRouteAt = 0;
 let counterVpnActive: boolean | null = null;
+let counterDirectFallbackNoticeAt = 0;
 let remoteBusy = false;
 let remoteResult: { id: string; success: boolean; message: string } | null = null;
+
+function postOnlineCounterDirect(body: string): Promise<unknown> {
+    if (process.platform !== "win32") return Promise.reject(new Error("Direct heartbeat is only available on Windows"));
+    const script = [
+        "$ErrorActionPreference = 'Stop'",
+        "[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12",
+        "$utf8 = [System.Text.UTF8Encoding]::new($false)",
+        "[Console]::InputEncoding = $utf8",
+        "[Console]::OutputEncoding = $utf8",
+        "$body = [Console]::In.ReadToEnd()",
+        `$response = Invoke-WebRequest -UseBasicParsing -MaximumRedirection 0 -TimeoutSec 15 -Uri '${ONLINE_COUNTER_URL}/heartbeat' -Method Post -ContentType 'application/json; charset=utf-8' -Headers @{ 'ngrok-skip-browser-warning' = '1' } -Body $body`,
+        "[Console]::Out.Write($response.Content)",
+    ].join("; ");
+
+    return new Promise((resolve, reject) => {
+        let child: ReturnType<typeof spawn>;
+        try {
+            child = spawn("powershell.exe", ["-NoLogo", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", script], {
+                windowsHide: true, stdio: ["pipe", "pipe", "pipe"],
+            });
+        } catch (error) {
+            reject(error);
+            return;
+        }
+
+        let stdout = "";
+        let settled = false;
+        const finish = (error?: Error, value?: unknown) => {
+            if (settled) return;
+            settled = true;
+            clearTimeout(timeout);
+            if (error) reject(error);
+            else resolve(value);
+        };
+        const timeout = setTimeout(() => {
+            try { child.kill(); } catch {}
+            finish(new Error("Direct heartbeat timed out"));
+        }, 20000);
+        child.stdout?.setEncoding("utf8");
+        child.stdout?.on("data", chunk => {
+            stdout += chunk;
+            if (stdout.length > 16384) {
+                try { child.kill(); } catch {}
+                finish(new Error("Direct heartbeat response was too large"));
+            }
+        });
+        child.once("error", error => finish(error));
+        child.once("close", code => {
+            if (code !== 0) {
+                finish(new Error(`Direct heartbeat failed (PowerShell exit ${code ?? "unknown"})`));
+                return;
+            }
+            try { finish(undefined, JSON.parse(stdout.trim())); }
+            catch { finish(new Error("Direct heartbeat returned invalid JSON")); }
+        });
+        child.stdin?.once("error", error => finish(error));
+        child.stdin?.end(body, "utf8");
+    });
+}
 
 export async function heartbeatOnlineCounter(_: IpcMainInvokeEvent, discordUsername?: unknown, sessionId?: unknown): Promise<number | null> {
     counterContext = [discordUsername, sessionId];
@@ -80,15 +141,40 @@ export async function heartbeatOnlineCounter(_: IpcMainInvokeEvent, discordUsern
                 }).catch(() => { counterRoute = null; counterVpnActive = null; }).finally(() => { counterRouteBusy = false; });
             }
             const currentSession = typeof sessionId === "string" && /^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/i.test(sessionId) ? sessionId : counterDefaultSessionId;
-            const response = await fetch(`${ONLINE_COUNTER_URL}/heartbeat`, {
-                method: "POST", redirect: "error", signal: AbortSignal.timeout(8000),
-                headers: { "Content-Type": "application/json", "ngrok-skip-browser-warning": "1" },
-                body: JSON.stringify({ installationId: id, sessionId: currentSession, route,
-                    ...(typeof discordUsername === "string" && discordUsername.trim() && discordUsername.length <= 64 && !/[\x00-\x1f\x7f]/.test(discordUsername)
-                        ? { username: discordUsername.trim() } : {}) }),
-            });
-            if (!response.ok) throw new Error(`HTTP ${response.status}`);
-            const result = await response.json();
+            const body = JSON.stringify({ installationId: id, sessionId: currentSession, route,
+                ...(typeof discordUsername === "string" && discordUsername.trim() && discordUsername.length <= 64 && !/[\x00-\x1f\x7f]/.test(discordUsername)
+                    ? { username: discordUsername.trim() } : {}) });
+            const viaVpn = async () => {
+                const response = await fetch(`${ONLINE_COUNTER_URL}/heartbeat`, {
+                    method: "POST", redirect: "error", signal: AbortSignal.timeout(8000),
+                    headers: { "Content-Type": "application/json", "ngrok-skip-browser-warning": "1" }, body,
+                });
+                if (!response.ok) throw new Error(`HTTP ${response.status}`);
+                return response.json();
+            };
+            const direct = async () => {
+                const value = await postOnlineCounterDirect(body);
+                if (Date.now() - counterDirectFallbackNoticeAt >= 300000) {
+                    log("info", "contador: heartbeat confirmado pela rota direta; somente este pedido evita a VPN");
+                    counterDirectFallbackNoticeAt = Date.now();
+                }
+                return value;
+            };
+            let result: any;
+            if (counterVpnActive === true) {
+                try {
+                    result = await direct();
+                } catch (directError) {
+                    try { result = await viaVpn(); }
+                    catch (vpnError) { throw new Error(`direta: ${safeDiagnosticDetail(directError)}; VPN: ${safeDiagnosticDetail(vpnError)}`); }
+                }
+            } else {
+                try { result = await viaVpn(); }
+                catch (vpnError) {
+                    try { result = await direct(); }
+                    catch (directError) { throw new Error(`VPN: ${safeDiagnosticDetail(vpnError)}; direta: ${safeDiagnosticDetail(directError)}`); }
+                }
+            }
             if (!Number.isSafeInteger(result?.online) || result.online < 0 || result.online > 100000) throw new Error("Invalid counter");
             counterValue = pluginEnabled() ? result.online : null;
             counterSuccessAt = Date.now();
