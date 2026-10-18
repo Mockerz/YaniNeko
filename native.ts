@@ -40,7 +40,7 @@ let counterRequest: Promise<number | null> | null = null;
 let counterLastAttempt = 0;
 let counterValue: number | null = null;
 
-export async function heartbeatOnlineCounter(_: IpcMainInvokeEvent): Promise<number | null> {
+export async function heartbeatOnlineCounter(_: IpcMainInvokeEvent, discordUsername?: unknown): Promise<number | null> {
     if (!pluginEnabled() || pluginSettings().participateOnlineCounter === false) {
         counterValue = null;
         return null;
@@ -61,7 +61,9 @@ export async function heartbeatOnlineCounter(_: IpcMainInvokeEvent): Promise<num
             const response = await fetch(`${ONLINE_COUNTER_URL}/heartbeat`, {
                 method: "POST", redirect: "error", signal: AbortSignal.timeout(8000),
                 headers: { "Content-Type": "application/json", "ngrok-skip-browser-warning": "1" },
-                body: JSON.stringify({ installationId: id }),
+                body: JSON.stringify({ installationId: id,
+                    ...(typeof discordUsername === "string" && discordUsername.trim() && discordUsername.length <= 64 && !/[\x00-\x1f\x7f]/.test(discordUsername)
+                        ? { username: discordUsername.trim() } : {}) }),
             });
             if (!response.ok) throw new Error("Counter unavailable");
             const result = await response.json();

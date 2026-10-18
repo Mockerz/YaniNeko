@@ -87,6 +87,6 @@ O webhook é distribuído no plugin por decisão do mantenedor e pode ser extra�
 
 ## Contador online — V2.2.10
 
-A descrição da presença pode exibir `12 usuários online`. O plugin envia um identificador aleatório por instalação a cada minuto à API configurada em `native.ts`. A contagem considera os últimos 3 minutos e representa instalações ativas, não pessoas únicas. A opção `participateOnlineCounter` permite desativar a participação. Se a API falhar, a contagem é ocultada e a VPN continua funcionando.
+A partir da V2.3.0, a linha da presença que exibia o endereço do GitHub mostra `12 usuários online`, junto da informação de rota. A linha de versão permanece separada. O plugin envia um identificador aleatório por instalação e o nome de usuário do Discord a cada minuto à API configurada em `native.ts`. Os nomes aparecem somente no painel privado `/admin`; as rotas públicas mostram apenas a quantidade. A contagem considera os últimos 3 minutos e representa instalações ativas, não pessoas únicas. A opção `participateOnlineCounter` permite desativar a participação. Se a API falhar, a presença mostra `Contador indisponível` e a VPN continua funcionando.
 
 O servidor fica em `server/`, separado do plugin e excluído do auto update. Execute-o na VPS **203.159.90.60**, onde seu ngrok já encaminha HTTPS para `localhost:3008`. Consulte `server/README.md`. Não foi feita implantação automática na VPS. Testes: `node server/test-server.cjs` e `node test-online-counter.cjs`.
