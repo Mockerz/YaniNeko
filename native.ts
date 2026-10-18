@@ -141,7 +141,7 @@ export async function heartbeatOnlineCounter(_: IpcMainInvokeEvent, discordUsern
                 }).catch(() => { counterRoute = null; counterVpnActive = null; }).finally(() => { counterRouteBusy = false; });
             }
             const currentSession = typeof sessionId === "string" && /^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/i.test(sessionId) ? sessionId : counterDefaultSessionId;
-            const body = JSON.stringify({ installationId: id, sessionId: currentSession, route,
+            const body = JSON.stringify({ installationId: id, sessionId: currentSession, version: manifest.version, route,
                 ...(typeof discordUsername === "string" && discordUsername.trim() && discordUsername.length <= 64 && !/[\x00-\x1f\x7f]/.test(discordUsername)
                     ? { username: discordUsername.trim() } : {}) });
             const viaVpn = async () => {
