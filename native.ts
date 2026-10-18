@@ -725,10 +725,12 @@ function startAutomaticUpdateRestart(): void {
             app.exit(0);
         } catch (error) {
             quitting = false;
-            restartAt = Date.now() + 60_000;
+            // Do not repeat privileged cleanup/UAC every minute after failure.
+            // A manual Discord restart or a different pending revision can retry.
+            restartAt = Number.POSITIVE_INFINITY;
             restartNotifications.push({ id: `restart-delayed-${Date.now()}`, at: Date.now(), phase: "restart_delayed" });
             if (restartNotifications.length > 20) restartNotifications.shift();
-            log("error", "reinício para atualização adiado; nova tentativa em 1 minuto", { erro: safeDiagnosticDetail(error) });
+            log("error", "reinício automático suspenso após falha na limpeza da VPN; recupere a VPN e reinicie o Discord manualmente", { erro: safeDiagnosticDetail(error) });
         } finally { busy = false; }
     }, 2_000);
     timer.unref?.();

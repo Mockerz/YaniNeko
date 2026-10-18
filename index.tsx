@@ -80,7 +80,7 @@ function startUpdateNotifications(isCurrent: () => boolean): void {
                     case "ready": showToast("Atualização pronta! O Discord vai reiniciar automaticamente em cerca de 10 segundos, inclusive durante chamadas.", "success"); break;
                     case "current": showToast("Lefferzin Bypass já está atualizado.", "success"); break;
                     case "error": showToast("Não foi possível preparar a atualização. A versão atual foi mantida; confira o log do atualizador.", "failure"); break;
-                    case "restart_delayed": showToast("Atualização pronta, mas não foi possível encerrar a VPN. Reinício adiado; nova tentativa em 1 minuto.", "failure"); break;
+                    case "restart_delayed": showToast("Atualização pronta, mas a limpeza da VPN falhou. Reinício automático suspenso. Recupere a VPN e reinicie o Discord manualmente.", "failure"); break;
                 }
             }
         } catch { /* Older native builds may not expose notifications until restart. */ }

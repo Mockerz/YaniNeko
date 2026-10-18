@@ -418,6 +418,7 @@ def main() -> int:
         inject(vencord)
         step("Configurando atualizações automáticas")
         run([shutil.which("node"), str(plugin_source / "auto-update.cjs"), "--install", str(vencord), str(plugin_source)], cwd=vencord)
+        configure_optional_uac(root)
         step("[8/8] Finalização")
         log("INSTALAÇÃO CONCLUÍDA.")
         log("Abra o Discord e ative LefferzinBypass em Configurações > Plugins.")
@@ -431,6 +432,81 @@ def main() -> int:
         if LOGGER:
             LOGGER.close()
             LOGGER = None
+
+
+def ask_disable_uac() -> bool:
+    """Closing the dialog, leaving it unchecked or UI failure preserves UAC."""
+    import tkinter as tk
+    from tkinter import ttk
+    window = tk.Tk()
+    window.title("YaniNeko — Opção do Windows")
+    window.resizable(False, False)
+    frame = ttk.Frame(window, padding=24)
+    frame.pack()
+    ttk.Label(frame, text="Instalação concluída", font=("Segoe UI", 14, "bold")).pack(anchor="w")
+    ttk.Label(frame, wraplength=480, text="Você pode manter a proteção padrão do Windows e concluir normalmente.\n\n"
+              "Desativar o Controle de Conta de Usuário (UAC) reduz a proteção de todo o Windows, "
+              "não apenas da VPN. A alteração exige permissão de administrador e só entra em vigor "
+              "após reiniciar o computador. Não reiniciaremos automaticamente.").pack(anchor="w", pady=14)
+    selected = tk.BooleanVar(value=False)
+    ttk.Checkbutton(frame, text="Desativar o UAC deste computador (não recomendado)", variable=selected).pack(anchor="w")
+    answer = False
+    def finish():
+        nonlocal answer
+        answer = selected.get() is True
+        window.destroy()
+    ttk.Button(frame, text="Concluir", command=finish).pack(anchor="e", pady=(20, 0))
+    window.protocol("WM_DELETE_WINDOW", window.destroy)
+    window.mainloop()
+    return answer
+
+
+def disable_uac(root: Path):
+    # Fixed, narrow command; do not elevate the full installer or switch its user.
+    import winreg
+    key_path = r"SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System"
+    with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, key_path, 0, winreg.KEY_READ | winreg.KEY_WOW64_64KEY) as key:
+        current, _ = winreg.QueryValueEx(key, "EnableLUA")
+    if current == 0:
+        log("UAC já está configurado como desativado. Pode ser necessário reiniciar o Windows.")
+        return
+    restore = root / "Reativar-UAC.reg"
+    restore.write_text('Windows Registry Editor Version 5.00\n\n'
+                       '[HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Policies\\System]\n'
+                       '"EnableLUA"=dword:00000001\n', encoding="utf-16")
+    script = ("$ErrorActionPreference='Stop'; "
+              "$p=Start-Process -FilePath ($env:SystemRoot+'\\System32\\reg.exe') "
+              "-ArgumentList @('ADD','HKLM\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Policies\\System',"
+              "'/v','EnableLUA','/t','REG_DWORD','/d','0','/f','/reg:64') "
+              "-Verb RunAs -WindowStyle Hidden -Wait -PassThru; exit $p.ExitCode")
+    powershell = str(Path(os.environ.get("SystemRoot", r"C:\Windows")) / "System32/WindowsPowerShell/v1.0/powershell.exe")
+    result = subprocess.run([powershell, "-NoProfile", "-NonInteractive", "-Command", script],
+                            capture_output=True, timeout=120, creationflags=subprocess.CREATE_NO_WINDOW)
+    if result.returncode != 0:
+        raise RuntimeError("A autorização foi cancelada ou o Windows recusou a alteração do UAC.")
+    with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, key_path, 0, winreg.KEY_READ | winreg.KEY_WOW64_64KEY) as key:
+        if winreg.QueryValueEx(key, "EnableLUA")[0] != 0:
+            raise RuntimeError("O Windows não confirmou a alteração do UAC.")
+    message = f"UAC configurado como desativado por escolha do usuário. Reinicie o computador para aplicar.\nPara reativar, abra {restore} e reinicie novamente."
+    log(message)
+    import ctypes
+    ctypes.windll.user32.MessageBoxW(None, message, "YaniNeko — Reinicialização necessária", 0x40)
+
+
+def configure_optional_uac(root: Path):
+    try:
+        if not ask_disable_uac():
+            log("Configuração do UAC mantida; opção de desativação não confirmada.")
+            return
+        disable_uac(root)
+    except Exception as exc:
+        # This optional action must not invalidate an otherwise successful install.
+        log(f"Instalação concluída, mas a opção de UAC não foi aplicada/confirmada: {exc}")
+        try:
+            import ctypes
+            ctypes.windll.user32.MessageBoxW(None, "A instalação foi concluída, mas não foi possível confirmar a alteração do UAC. Consulte o log.", "YaniNeko", 0x30)
+        except Exception:
+            pass
 
 
 if __name__ == "__main__":

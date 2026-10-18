@@ -699,8 +699,11 @@ export async function stopOwnedWireSock(configPath: string, log: WireSockLogger)
                 log("warn", "não consegui solicitar parada do serviço WireSock próprio", { servico: name });
         }
     }
-    for (let attempt = 0; attempt < 2; attempt++) {
-        await wait(500);
+    const attemptedPids = new Set<number>();
+    // Let SCM finish stopping the service before resorting to taskkill.
+    // Never request elevation twice for the same PID in one cleanup.
+    for (let attempt = 0; initial.active && attempt < 3; attempt++) {
+        await wait(attempt === 0 ? 5000 : 500);
         const current = inspectWireSock(configPath);
         if (!current.active) break;
         if (!current.owned) {
@@ -708,7 +711,9 @@ export async function stopOwnedWireSock(configPath: string, log: WireSockLogger)
             log("error", "limpeza interrompida ao detectar WireSock externo", { motivo: error });
             return { stopped: false, servicesResidual: current.services, processResidual: current.processIds, networkLockReset: false, dnsCleared: false, dnsFlushed: false, error };
         }
-        killOwnProcesses(current.processIds, log);
+        const remaining = current.processIds.filter(pid => !attemptedPids.has(pid));
+        remaining.forEach(pid => attemptedPids.add(pid));
+        killOwnProcesses(remaining, log);
     }
 
     const executable = findWireSockCandidate()?.executable;
