@@ -148,10 +148,11 @@ let onlineCounterTimer: ReturnType<typeof setInterval> | null = null;
 
 function startOnlineCounter(isCurrent: () => boolean): void {
     if (onlineCounterTimer) clearInterval(onlineCounterTimer);
+    const sessionId = crypto.randomUUID();
     const poll = async () => {
         if (!isCurrent()) return;
         try {
-            const online = await Native?.heartbeatOnlineCounter?.(UserStore.getCurrentUser()?.username);
+            const online = await Native?.heartbeatOnlineCounter?.(UserStore.getCurrentUser()?.username, sessionId);
             if (isCurrent()) updateOnlineUsers(typeof online === "number" ? online : null);
         } catch { if (isCurrent()) updateOnlineUsers(null); }
     };
@@ -307,16 +308,6 @@ function AboutPlugin() {
 }
 
 const settings = definePluginSettings({
-    participateOnlineCounter: {
-        type: OptionType.BOOLEAN,
-        description: "Participar do contador online: envia um identificador da instalação e seu nome de usuário do Discord a cada minuto. O nome aparece somente no painel privado do administrador; a presença mostra apenas a quantidade.",
-        default: true
-    },
-    automaticErrorReports: {
-        type: OptionType.BOOLEAN,
-        description: "Enviar erros e diagnóstico recente ao Discord do suporte Yani Neko, com seu nome de usuário do Discord. Senhas e tokens são filtrados.",
-        default: true
-    },
     aboutSettings: {
         type: OptionType.COMPONENT,
         description: "Passo a passo rapido: 1) Entrar na conta Proton  ->  2) Otimizar rota  ->  3) Start Bypass",
