@@ -6,11 +6,10 @@ title YaniNeko - Baixar e instalar
 :: Discord e instalado por usuario. Nao trocar a conta via elevacao automatica.
 
 set "URL=https://github.com/Mockerz/YaniNeko/releases/download/4.0.0/YaniNeko-Installer.exe"
-set "EXPECTED_RELEASE_SHA256=7E436C7A7DF2F6962BF0CAD66643C8D108BD4422C330D802EE356937DA6A6111"
-set "EXPECTED_LOCAL_SHA256=FD3F65BE3A915F137CBD4451C8F37A62595278BDF8A214B00E0B02220B732F6B"
+set "EXPECTED_SHA256=D87587548DF398453FBE980357A903D9D7179E9C4D07A95B476974A1B508E582"
 set "OUT=%TEMP%\YaniNeko-Installer-auto-%RANDOM%-%RANDOM%.exe"
 
-:: Reaproveita o EXE local recém-compilado quando o hash corresponde.
+:: Reaproveita o EXE local recem-compilado quando o hash corresponde.
 if exist "%~dp0YaniNeko-Installer.exe" (
     set "LOCAL_INSTALLER=%~dp0YaniNeko-Installer.exe"
     call :validar_local
@@ -22,7 +21,7 @@ echo.
 echo Baixando YaniNeko Installer com atualizacao automatica...
 echo.
 
-powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "$ErrorActionPreference='Stop'; [Net.ServicePointManager]::SecurityProtocol=[Net.SecurityProtocolType]::Tls12; Invoke-WebRequest -Uri $env:URL -OutFile $env:OUT -UseBasicParsing -TimeoutSec 600"
+powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "$ErrorActionPreference='Stop'; try { [Net.ServicePointManager]::SecurityProtocol=[Net.SecurityProtocolType]::Tls12; [void](Invoke-WebRequest -Uri $env:URL -OutFile $env:OUT -UseBasicParsing -TimeoutSec 600); if (-not (Test-Path -LiteralPath $env:OUT)) { throw 'O arquivo de download nao foi criado.' } } catch { Write-Error $_; exit 1 }"
 if errorlevel 1 (
     echo [AVISO] PowerShell falhou. Tentando curl.exe...
     curl.exe -L --fail --retry 3 --connect-timeout 20 --max-time 900 "%URL%" -o "%OUT%"
@@ -52,9 +51,9 @@ echo.
 echo Download concluido.
 :instalar
 echo Validando o instalador...
-powershell.exe -NoProfile -Command "$ErrorActionPreference='Stop'; $actual=(Get-FileHash -LiteralPath $env:OUT -Algorithm SHA256).Hash; if ($actual -ne $env:EXPECTED_RELEASE_SHA256) { Write-Host ('Esperado: '+$env:EXPECTED_RELEASE_SHA256); Write-Host ('Recebido: '+$actual); exit 1 }"
+powershell.exe -NoProfile -Command "$ErrorActionPreference='Stop'; $actual=(Get-FileHash -LiteralPath $env:OUT -Algorithm SHA256).Hash; if ($actual -ne $env:EXPECTED_SHA256) { Write-Host ('Esperado: '+$env:EXPECTED_SHA256); Write-Host ('Recebido: '+$actual); exit 1 }"
 if errorlevel 1 (
-    echo [ERRO] O arquivo recebido da release 4.0.0 nao corresponde ao build esperado.
+    echo [ERRO] O instalador nao corresponde ao hash deste build.
     echo Baixe o BAT atualizado. Nao e necessario mudar a versao 4.0.0.
     pause
     exit /b 1
@@ -75,7 +74,7 @@ pause
 exit /b 0
 
 :validar_local
-powershell.exe -NoProfile -Command "$ErrorActionPreference='Stop'; $actual=(Get-FileHash -LiteralPath $env:LOCAL_INSTALLER -Algorithm SHA256).Hash; if ($actual -ne $env:EXPECTED_LOCAL_SHA256) { Write-Host ('Hash local esperado: '+$env:EXPECTED_LOCAL_SHA256); Write-Host ('Hash recebido: '+$actual); exit 1 }"
+powershell.exe -NoProfile -Command "$ErrorActionPreference='Stop'; $actual=(Get-FileHash -LiteralPath $env:LOCAL_INSTALLER -Algorithm SHA256).Hash; if ($actual -ne $env:EXPECTED_SHA256) { Write-Host ('Esperado: '+$env:EXPECTED_SHA256); Write-Host ('Recebido: '+$actual); exit 1 }"
 exit /b %errorlevel%
 
 :usar_local
