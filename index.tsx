@@ -157,7 +157,7 @@ function startOnlineCounter(isCurrent: () => boolean): void {
         } catch { if (isCurrent()) updateOnlineUsers(null); }
     };
     void poll();
-    onlineCounterTimer = setInterval(() => void poll(), 60000);
+    onlineCounterTimer = setInterval(() => void poll(), 30000);
 }
 let pluginRunning = false;
 let pluginGeneration = 0;
@@ -682,6 +682,11 @@ function VpnPanel() {
 
     return (
         <section style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
+            <div>
+                <Paragraph>Suporte</Paragraph>
+                <MaskedLink href="https://discord.gg/WX8AnmAp44" style={{ display: "inline-block", background: "#238636", color: "#fff", padding: "10px 16px", borderRadius: "8px", fontWeight: 700 }}>Entrar no servidor de suporte</MaskedLink>
+                <Paragraph style={{ color: "var(--text-muted)", fontSize: "12px" }}>A atividade pode ficar oculta pelas suas configurações de privacidade do Discord. Isso não desliga a VPN nem altera o contador de usuários.</Paragraph>
+            </div>
             <Paragraph style={{ margin: 0, padding: "10px 12px", borderRadius: "8px", background: statusBg, color: statusColor, fontSize: "14px", fontWeight: 600 }}>
                 <strong>Status:</strong> {statusLabel}
             </Paragraph>

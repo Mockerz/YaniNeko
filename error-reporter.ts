@@ -7,7 +7,7 @@ export function redactReport(value: string): string {
         .replace(/\b[A-Za-z0-9+/]{43}=/g, "<chave removida>")
         .replace(/\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/gi, "<email removido>")
         .replace(/\b(?:\d{1,3}\.){3}\d{1,3}\b/g, "<ip removido>")
-        .replace(/\b(?:[a-f0-9]{0,4}:){2,}[a-f0-9:]{0,39}\b/gi, "<ipv6 removido>")
+        .replace(/\b(?:[a-f0-9]{0,4}:){2,}[a-f0-9:]{0,39}\b/gi, value => value.includes("::") || (value.match(/:/g)?.length ?? 0) >= 7 ? "<ipv6 removido>" : value)
         .replace(/[A-Z]:\\Users\\[^\\\r\n]+/gi, "<perfil local>")
         .replace(/\b[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{6,}\.[A-Za-z0-9_-]{20,}\b/g, "<token removido>");
 }
@@ -28,7 +28,8 @@ export class ErrorReporter {
     private nextSend = 0;
     private busy = false;
     constructor(private options: {
-        webhook: () => string;
+        webhook?: () => string;
+        relay?: (text: string, filename: string) => Promise<Response>;
         enabled: () => boolean;
         version: string;
         diagnostic: () => string;
@@ -63,9 +64,10 @@ export class ErrorReporter {
         const now = this.options.now?.() ?? Date.now();
         if (this.busy || !this.username || !this.pending.length || now < this.nextSend) return;
         if (!this.options.enabled()) { this.pending = []; return; }
-        const webhook = this.options.webhook();
-        if (!validWebhook(webhook)) { this.pending = []; return; }
+        const webhook = this.options.webhook?.() || "";
+        if (!this.options.relay && !validWebhook(webhook)) return;
         const events = this.pending.splice(0);
+        const username = this.username;
         this.busy = true;
         this.nextSend = now + 5 * 60_000;
         try {
@@ -73,7 +75,7 @@ export class ErrorReporter {
             const form = new FormData();
             form.append("payload_json", JSON.stringify({ content: `Erro no Yani Neko ${this.options.version}. Diagnóstico anexado.`, allowed_mentions: { parse: [] } }));
             form.append("files[0]", new Blob([text], { type: "text/plain;charset=utf-8" }), reportFilename(this.username));
-            const response = await (this.options.send ?? fetch)(`${webhook}?wait=true`, {
+            const response = this.options.relay ? await this.options.relay(text.slice(0, 40000), reportFilename(username)) : await (this.options.send ?? fetch)(`${webhook}?wait=true`, {
                 method: "POST", body: form, redirect: "error", signal: AbortSignal.timeout(15000)
             });
             if (!response.ok) {
@@ -84,9 +86,10 @@ export class ErrorReporter {
                 throw new Error(`HTTP ${response.status}`);
             }
             this.options.status("relatório de erro enviado");
-        } catch {
+        } catch (error) {
+            if (this.username === username) this.pending = [...new Set([...events, ...this.pending])].slice(-20);
             // Do not recursively report upload failures or persist sensitive queues.
-            this.options.status("não foi possível enviar o relatório; diagnóstico preservado no log local");
+            this.options.status(`não foi possível enviar o relatório; nova tentativa agendada (${redactReport(String(error)).slice(0, 200)})`);
         } finally {
             this.busy = false;
             this.schedule();

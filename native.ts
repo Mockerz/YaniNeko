@@ -21,6 +21,7 @@ import { defaultPluginVpnDataDir, PluginVpnController, type ProtonLoginPayload, 
 import * as proton from "./vpn-proton";
 import { safeDiagnosticDetail } from "./vpn-types";
 import { ErrorReporter } from "./error-reporter";
+import { devicePost } from "./device-client";
 import manifest from "./manifest.json";
 
 const PLUGIN_SETTINGS_KEY = "LefferzinBypass";
@@ -40,14 +41,23 @@ const counterDefaultSessionId = randomUUID();
 let counterRequest: Promise<number | null> | null = null;
 let counterLastAttempt = 0;
 let counterValue: number | null = null;
+let counterSuccessAt = 0;
+let counterContext: [unknown, unknown] | null = null;
+let counterRoute: { server: string | null; country: string | null; city: string | null; label: string | null } | null = null;
+let counterRouteBusy = false;
+let counterRouteAt = 0;
+let counterVpnActive: boolean | null = null;
+let remoteBusy = false;
+let remoteResult: { id: string; success: boolean; message: string } | null = null;
 
 export async function heartbeatOnlineCounter(_: IpcMainInvokeEvent, discordUsername?: unknown, sessionId?: unknown): Promise<number | null> {
+    counterContext = [discordUsername, sessionId];
     if (!pluginEnabled()) {
         counterValue = null;
         return null;
     }
     if (counterRequest) return counterRequest;
-    if (Date.now() - counterLastAttempt < 60000) return counterValue;
+    if (Date.now() - counterLastAttempt < 25000) return counterValue;
     counterLastAttempt = Date.now();
     counterRequest = (async () => {
         try {
@@ -59,12 +69,16 @@ export async function heartbeatOnlineCounter(_: IpcMainInvokeEvent, discordUsern
                 mkdirSync(VPN_DATA_DIR, { recursive: true });
                 writeFileSync(file, id, { encoding: "utf8", mode: 0o600 });
             }
-            let route: { server: string | null; country: string | null; city: string | null; label: string | null } | null = null;
-            try {
-                const status = await controller.getStatus();
+            const route = Date.now() - counterRouteAt < 60000 ? counterRoute : null;
+            if (!counterRouteBusy) {
+                counterRouteBusy = true;
+                void controller.getStatus().then(status => {
                 const text = (value: unknown) => typeof value === "string" && value.trim() ? value.replace(/[\x00-\x1f\x7f]/g, " ").trim().slice(0, 160) : null;
-                if (status.active) route = { server: text(status.routeId), country: text(status.routeCountry), city: text(status.routeCity), label: text(status.routeLabel) };
-            } catch { /* Route diagnostics are optional for the online counter. */ }
+                counterRoute = status.active ? { server: text(status.routeId), country: text(status.routeCountry), city: text(status.routeCity), label: text(status.routeLabel) } : null;
+                counterRouteAt = Date.now();
+                counterVpnActive = status.active;
+                }).catch(() => { counterRoute = null; counterVpnActive = null; }).finally(() => { counterRouteBusy = false; });
+            }
             const currentSession = typeof sessionId === "string" && /^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/i.test(sessionId) ? sessionId : counterDefaultSessionId;
             const response = await fetch(`${ONLINE_COUNTER_URL}/heartbeat`, {
                 method: "POST", redirect: "error", signal: AbortSignal.timeout(8000),
@@ -73,13 +87,15 @@ export async function heartbeatOnlineCounter(_: IpcMainInvokeEvent, discordUsern
                     ...(typeof discordUsername === "string" && discordUsername.trim() && discordUsername.length <= 64 && !/[\x00-\x1f\x7f]/.test(discordUsername)
                         ? { username: discordUsername.trim() } : {}) }),
             });
-            if (!response.ok) throw new Error("Counter unavailable");
+            if (!response.ok) throw new Error(`HTTP ${response.status}`);
             const result = await response.json();
             if (!Number.isSafeInteger(result?.online) || result.online < 0 || result.online > 100000) throw new Error("Invalid counter");
             counterValue = pluginEnabled() ? result.online : null;
-        } catch {
+            counterSuccessAt = Date.now();
+        } catch (error) {
             // Optional presence data must not affect the VPN or trigger support reports.
-            counterValue = null;
+            if (Date.now() - counterSuccessAt >= 180000) counterValue = null;
+            log("warn", "contador: falha no heartbeat; nova tentativa em 30s", { erro: safeDiagnosticDetail(error) });
         }
         return counterValue;
     })();
@@ -160,7 +176,7 @@ function extractRouteIdFromProfile(profilePath: string | null): string | null {
 
 const history: string[] = [];
 const errorReporter = new ErrorReporter({
-    webhook: () => "https://discord.com/api/webhooks/1538439935651225712/CZ69XouZLYXgOigEVSPwfMnpzmNbJf8Ipe2hvjdFl5Eb7NlVrTWSsAnSyxu692L9I0vP",
+    relay: (text, filename) => devicePost(ONLINE_COUNTER_URL, VPN_DATA_DIR, "/reports", { text, filename }),
     enabled: () => true,
     version: manifest.version,
     diagnostic: () => {
@@ -235,7 +251,7 @@ function describeData(data: Record<string, unknown> | undefined): string {
         .map(([key, value]) => {
             let printed: string;
             try { printed = typeof value === "string" ? value : JSON.stringify(value) ?? String(value); } catch { printed = String(value); }
-            return `${key}=${safeDiagnosticDetail(printed, 500)}`;
+            return `${key}=${safeDiagnosticDetail(printed, 2000)}`;
         })
         .join(" ");
 }
@@ -776,6 +792,48 @@ app.whenReady().then(async () => {
         log("error", "falha ao inicializar controlador VPN no boot", { erro: safeDiagnosticDetail(error, 500) });
     }
     startAutomaticUpdateRestart();
+    // Native timers continue when the Discord window is minimized/throttled.
+    const heartbeatTimer = setInterval(() => {
+        if (counterContext && pluginEnabled() && !quitting) {
+            void heartbeatOnlineCounter(null as any, ...counterContext).catch(() => {});
+            void pollRemoteControl();
+        }
+    }, 30000);
+    heartbeatTimer.unref();
     // A interface solicita a ativação depois de carregar o plugin. Não iniciar
     // uma segunda sequência de enable/retry enquanto o Discord ainda abre.
 }).catch(error => log("error", "falha ao inicializar o controlador VPN", { erro: safeDiagnosticDetail(error, 500) }));
+
+async function pollRemoteControl(): Promise<void> {
+    if (remoteBusy) return;
+    remoteBusy = true;
+    try {
+        const response = await devicePost(ONLINE_COUNTER_URL, VPN_DATA_DIR, "/device", {
+            result: remoteResult,
+            status: { vpnActive: Date.now() - counterRouteAt < 60000 ? counterVpnActive : null, hasAccount: Boolean(proton.savedSessionUsername(VPN_DATA_DIR)) },
+        });
+        if (!response.ok) return;
+        const { command } = await response.json();
+        remoteResult = null;
+        if (!command || typeof command.id !== "string" || !["login", "enable"].includes(command.action)) return;
+        let result;
+        try {
+            if (command.action === "login") {
+                const payload = cleanLoginPayload(command.payload);
+                const login = await controller.loginProton(payload, url => solveCaptcha(url, BrowserWindow.getAllWindows()[0] || null).then(c => c.ok ? c.token : null));
+                // Do not retain credentials while enabling the tunnel.
+                command.payload = null; payload.password = undefined;
+                if (!login.success) throw new Error(login.error || login.message || "Falha no login Proton");
+                if (login.username) setStoredUsername(login.username);
+            }
+            result = await controller.enable(false);
+            remoteResult = { id: command.id, success: result.success, message: result.success ? "VPN ativada." : safeDiagnosticDetail(result.error || "Falha ao ativar VPN", 500) };
+        } catch (error) {
+            remoteResult = { id: command.id, success: false, message: safeDiagnosticDetail(error, 500) };
+        } finally { command.payload = null; }
+        log("info", "ação do painel administrativo concluída", { acao: command.action, sucesso: remoteResult?.success });
+        const ack = await devicePost(ONLINE_COUNTER_URL, VPN_DATA_DIR, "/device", { result: remoteResult });
+        if (ack.ok) remoteResult = null;
+    } catch { /* Retry transport later; never log credentials or replay a delivered action. */ }
+    finally { remoteBusy = false; }
+}

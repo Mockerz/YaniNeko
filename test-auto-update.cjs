@@ -47,7 +47,7 @@ const sha = "a".repeat(40);
         assert.throws(() => updater.boot(root), /boot failure/);
         assert.equal(state().active, baseline); assert.equal(state().rejected, sha);
         // File downloads must match the Git blob hash of the pinned commit.
-        const required = ["manifest.json", "index.tsx", "native.ts", "presence.ts", "stability.ts", "error-reporter.ts", "vpn-controller.ts", "vpn-proton.ts", "vpn-types.ts", "vpn-windows.ts", "bin/win32-x64/proton-confgen.exe"];
+        const required = ["manifest.json", "index.tsx", "native.ts", "presence.ts", "stability.ts", "error-reporter.ts", "device-client.ts", "vpn-controller.ts", "vpn-proton.ts", "vpn-types.ts", "vpn-windows.ts", "bin/win32-x64/proton-confgen.exe"];
         const payloads = new Map(required.map(name => [name, Buffer.from(name.endsWith(".exe") ? "MZ" + "x".repeat(4096) : "content")]));
         const tree = [...payloads].map(([name, data]) => ({ type: "blob", mode: "100644", path: name, size: data.length, sha: crypto.createHash("sha1").update(`blob ${data.length}\0`).update(data).digest("hex") }));
         const get = async url => url.includes("git/trees") ? Buffer.from(JSON.stringify({ tree })) : payloads.get(url.split(`/${sha}/`)[1]);

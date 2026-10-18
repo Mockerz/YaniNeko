@@ -5,7 +5,7 @@ const installed = process.argv[2] ? path.resolve(process.argv[2]) : path.join(pr
 const testRoot = path.join(__dirname, "build", "update-validation-" + Date.now());
 const source = path.join(testRoot, "source");
 fs.mkdirSync(source, { recursive: true });
-for (const file of ["manifest.json", "index.tsx", "native.ts", "presence.ts", "stability.ts", "error-reporter.ts", "vpn-controller.ts", "vpn-proton.ts", "vpn-types.ts", "vpn-windows.ts", "auto-update.cjs", "bin/win32-x64/proton-confgen.exe"]) {
+for (const file of ["manifest.json", "index.tsx", "native.ts", "presence.ts", "stability.ts", "error-reporter.ts", "device-client.ts", "vpn-controller.ts", "vpn-proton.ts", "vpn-types.ts", "vpn-windows.ts", "auto-update.cjs", "bin/win32-x64/proton-confgen.exe"]) {
     fs.mkdirSync(path.dirname(path.join(source, file)), { recursive: true });
     fs.copyFileSync(path.join(__dirname, file), path.join(source, file));
 }

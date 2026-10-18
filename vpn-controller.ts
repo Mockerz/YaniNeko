@@ -972,7 +972,7 @@ export class PluginVpnController {
         const probePath = owner?.probePath;
         const route = !probePath || !fs.existsSync(probePath) ? Promise.resolve() : windows.runRouteProbe(probePath).then(result => {
             this.setDiagnostic("route", Boolean(result?.success), safeDiagnosticDetail(JSON.stringify(result || { error: "resposta vazia" }), 500));
-            this.options.log(result?.success ? "info" : "warn", "probe de rota do Discord concluído", { stage, result: safeDiagnosticDetail(JSON.stringify(result || {}), 500), mode: "log-only" });
+            this.options.log(result?.success ? "info" : "warn", "probe de rota do Discord concluído", { stage, result: safeDiagnosticDetail(JSON.stringify(result || {}), 2000), mode: "log-only" });
         }).catch(error => {
             this.setDiagnostic("route", false, error);
             this.options.log("warn", "probe de rota do Discord falhou", { stage, erro: errorMessage(error), mode: "log-only" });

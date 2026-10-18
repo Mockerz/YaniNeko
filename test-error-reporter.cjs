@@ -10,6 +10,8 @@ const { ErrorReporter, redactReport, reportFilename, validWebhook } = mod.export
 (async () => {
     const secret = 'password="my secret password" token=abcdef PrivateKey=secretkey PresharedKey=peerkey user@example.com 192.168.1.2 C:\\Users\\joao\\file https://discord.com/api/webhooks/123/SECRET';
     const redacted = redactReport(secret);
+    assert.ok(redactReport("2026-10-18T16:04:03.559Z 16:04:03.559 2001:db8::1").includes("16:04:03.559"));
+    assert.ok(!redactReport("2001:db8::1").includes("2001:db8"));
     for (const value of ["my secret password", "abcdef", "secretkey", "peerkey", "user@example.com", "192.168.1.2", "joao", "SECRET"]) assert.ok(!redacted.includes(value), value);
     assert.equal(reportFilename("joao123"), "erro.joao123.log");
     assert.ok(!reportFilename("../../evil\r\n").includes("/"));
@@ -39,6 +41,7 @@ const { ErrorReporter, redactReport, reportFilename, validWebhook } = mod.export
     enabled = true; statusCode = 429; reporter.capture("rate limited"); await reporter.flush(); assert.equal(sends.length, 3);
     reporter.capture("later"); now += 300000; await reporter.flush(); assert.equal(sends.length, 3);
     now += 300000; statusCode = 200; await reporter.flush(); assert.equal(sends.length, 4);
+    assert.match(await sends[3].options.body.get("files[0]").text(), /rate limited/, "failed reports are retried");
     assert.ok(statuses.some(s => s.includes("não foi possível")));
     reporter.capture("old account error");
     reporter.setUsername("outro_usuario");
