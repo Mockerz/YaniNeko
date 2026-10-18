@@ -210,7 +210,7 @@ async function download(url, limit = 4 * 1024 * 1024) {
     return Buffer.concat(chunks);
 }
 function pluginFile(name) {
-    return !name.split("/").some(p => p.startsWith(".") || ["node_modules", "build", "dist", "tests"].includes(p))
+    return !name.split("/").some(p => p.startsWith(".") || ["node_modules", "build", "dist", "tests", "server"].includes(p))
         && !/(^|\/)test[-_.]/.test(name)
         && (/\.(?:tsx?|m?js|cjs|json|css|svg|png|jpg|jpeg|gif|webp|ico|woff2?|ttf|wasm)$/.test(name) || name === REQUIRED.at(-1));
 }

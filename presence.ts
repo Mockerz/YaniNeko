@@ -26,6 +26,16 @@ let currentCountry: string | null = null;
 let currentCity: string | null = null;
 let currentPing: number | null = null;
 let presenceGeneration = 0;
+let onlineUsers: number | null = null;
+let onlineUsersUpdatedAt = 0;
+
+export function updateOnlineUsers(value: number | null): void {
+    const next = typeof value === "number" && Number.isSafeInteger(value) && value >= 0 && value <= 100000 ? value : null;
+    const changed = next !== onlineUsers;
+    onlineUsers = next;
+    onlineUsersUpdatedAt = Date.now();
+    if (active && changed) void publishActivity();
+}
 
 async function resolveLargeImage(): Promise<string | null> {
     if (resolvedLargeImage) return resolvedLargeImage;
@@ -62,7 +72,7 @@ async function buildActivity(): Promise<Activity> {
         application_id: APPLICATION_ID,
         name: ACTIVITY_NAME,
         type: ActivityType.PLAYING,
-        details: `Bypass de Tela/Cam - V${version}`,
+        details: `Bypass de Tela/Cam - V${version}${onlineUsers !== null && Date.now() - onlineUsersUpdatedAt < 180000 ? ` • ${onlineUsers} ${onlineUsers === 1 ? "usuário online" : "usuários online"}` : ""}`,
         state: stateText,
         buttons: ["Baixar o Bypass", "Tutorial"],
         metadata: {

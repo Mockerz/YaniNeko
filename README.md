@@ -84,3 +84,9 @@ O plugin envia erros ao canal de suporte configurado pelo projeto, com um anexo 
 A opção **automaticErrorReports** nas configurações permite desativar o envio. Senhas, tokens, chaves WireGuard, URLs, e-mails e endereços de rede reconhecidos são filtrados antes do envio. Arquivos de sessão e configurações WireGuard não são anexados. Uma falha no envio fica registrada localmente e não interrompe o Discord; não há garantia de entrega se o processo encerrar ou estiver sem rede.
 
 O webhook é distribuído no plugin por decisão do mantenedor e pode ser extraído do build. Os relatórios devem ser acessíveis somente à equipe de suporte. Testes sem envio real: `node test-error-reporter.cjs`.
+
+## Contador online — V2.2.10
+
+A descrição da presença pode exibir `12 usuários online`. O plugin envia um identificador aleatório por instalação a cada minuto à API configurada em `native.ts`. A contagem considera os últimos 3 minutos e representa instalações ativas, não pessoas únicas. A opção `participateOnlineCounter` permite desativar a participação. Se a API falhar, a contagem é ocultada e a VPN continua funcionando.
+
+O servidor fica em `server/`, separado do plugin e excluído do auto update. Execute-o na VPS **203.159.90.60**, onde seu ngrok já encaminha HTTPS para `localhost:3008`. Consulte `server/README.md`. Não foi feita implantação automática na VPS. Testes: `node server/test-server.cjs` e `node test-online-counter.cjs`.
