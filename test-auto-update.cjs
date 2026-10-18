@@ -47,7 +47,7 @@ const sha = "a".repeat(40);
         assert.throws(() => updater.boot(root), /boot failure/);
         assert.equal(state().active, baseline); assert.equal(state().rejected, sha);
         // File downloads must match the Git blob hash of the pinned commit.
-        const required = ["manifest.json", "index.tsx", "native.ts", "presence.ts", "stability.ts", "vpn-controller.ts", "vpn-proton.ts", "vpn-types.ts", "vpn-windows.ts", "bin/win32-x64/proton-confgen.exe"];
+        const required = ["manifest.json", "index.tsx", "native.ts", "presence.ts", "stability.ts", "error-reporter.ts", "vpn-controller.ts", "vpn-proton.ts", "vpn-types.ts", "vpn-windows.ts", "bin/win32-x64/proton-confgen.exe"];
         const payloads = new Map(required.map(name => [name, Buffer.from(name.endsWith(".exe") ? "MZ" + "x".repeat(4096) : "content")]));
         const tree = [...payloads].map(([name, data]) => ({ type: "blob", mode: "100644", path: name, size: data.length, sha: crypto.createHash("sha1").update(`blob ${data.length}\0`).update(data).digest("hex") }));
         const get = async url => url.includes("git/trees") ? Buffer.from(JSON.stringify({ tree })) : payloads.get(url.split(`/${sha}/`)[1]);
@@ -81,8 +81,45 @@ const sha = "a".repeat(40);
             write(checkedPath, { ...checked, at: Date.now() - 3 * 60 * 60 * 1000 });
             await updater.check(root);
             assert.equal(requests, 3, "open Discord checks again after three hours");
+            const pendingPath = path.join(root, ".yanineko-updates/pending.json");
+            const quarantineDir = path.join(root, ".yanineko-updates/quarantine");
+            const invalidMarkers = ["{broken", "null", { id: "../escape" }, { id: "c".repeat(40) }, { id: badSha }, { id: baseline }];
+            for (const marker of invalidMarkers) {
+                const before = fs.readdirSync(quarantineDir).length;
+                write(pendingPath, marker);
+                await updater.check(root);
+                assert.ok(!fs.existsSync(pendingPath), "invalid pending must not block checks");
+                assert.equal(fs.readdirSync(quarantineDir).length, before + 1);
+                assert.equal(state().active, baseline);
+            }
+            assert.equal(requests, 3 + invalidMarkers.length, "recovery bypasses the cooldown");
+
+            // A corrupt release is preserved for diagnosis and replaced by a validated build.
+            const replacement = path.join(root, "replacement");
+            fs.cpSync(updater.release(root, baseline), replacement, { recursive: true });
+            updater.stageRelease(root, badSha, replacement);
+            updater.validateRelease(bad);
+            const quarantinedRelease = fs.readdirSync(quarantineDir).find(name => name.startsWith(badSha));
+            assert.equal(fs.readFileSync(path.join(quarantineDir, quarantinedRelease, "renderer.js"), "utf8"), "corrupt");
+            write(pendingPath, { id: badSha });
+            await updater.check(root);
+            assert.ok(fs.existsSync(pendingPath), "valid pending remains ready for next launch");
+            assert.equal(requests, 3 + invalidMarkers.length, "valid pending must not trigger another download");
+            assert.equal(updater.choose(root), badSha);
+
+            // Never displace a release that may still be loaded or needed for rollback.
+            const protectedReplacement = path.join(root, "protected-replacement");
+            fs.cpSync(bad, protectedReplacement, { recursive: true });
+            for (const protectedId of [badSha, baseline]) {
+                const protectedFile = path.join(updater.release(root, protectedId), "renderer.js");
+                const original = fs.readFileSync(protectedFile);
+                fs.writeFileSync(protectedFile, "corrupt protected release");
+                assert.throws(() => updater.stageRelease(root, protectedId, protectedReplacement), /active or rollback/);
+                assert.equal(fs.readFileSync(protectedFile, "utf8"), "corrupt protected release");
+                fs.writeFileSync(protectedFile, original);
+            }
         } finally { global.fetch = originalFetch; }
-        console.log("PASS: installation, deferred activation, preserved baseline, corrupt build rejection, rollback, path validation, pinned source hashes");
+        console.log("PASS: installation, deferred activation, preserved baseline, corrupt build rejection, rollback, path validation, pinned source hashes, pending recovery, release quarantine, protected releases");
     } finally {
         const resolved = fs.realpathSync(root);
         assert.ok(resolved.startsWith(fs.realpathSync(__dirname) + path.sep));

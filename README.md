@@ -69,6 +69,18 @@ Para publicar uma alteração do plugin, basta fazer push na `main`. Não precis
 
 O executável é distribuído pela release do GitHub e o BAT valida seu SHA256 antes de executá-lo. Se alterar `instalar_yanineko.py`, recompile `YaniNeko-Installer.exe`, publique-o na release e atualize a URL e o SHA256 em `BypassDiscord.bat` antes do push. O EXE gerado não entra no Git. Alterações apenas no plugin não exigem recompilar o instalador.
 
+Publicação preparada: o BAT aponta para a release **4.0.1** do instalador, com correção de saída em consoles Windows com codificação antiga. Anexe o novo `YaniNeko-Installer.exe` a essa release ao publicar estes fontes; o download pelo BAT depende desse asset. SHA256 esperado: `FA33C5B4F5E113FF6DB1E605F1BF11401CCE4D361A02C5656B9C369EC953FF06`. A versão do plugin permanece **2.2.9**.
+
 Logs e estado: `%LOCALAPPDATA%\LefferzinBypass\Vencord\.yanineko-updates`. Conta Proton e configuração da VPN são preservadas. Se uma atualização do próprio Discord remover a injeção do Vencord, será necessário executar o instalador novamente.
 
+A partir da V2.2.8, marcadores de atualização inválidos e builds preparados corrompidos são movidos para a subpasta `quarantine`, com o motivo registrado em `updater.log`. O atualizador pode preparar outra cópia sem ficar preso à tentativa anterior. As versões ativa e de retorno não são substituídas por essa recuperação.
+
 Validação de desenvolvimento: `node test-auto-update.cjs`. O teste `node validate-update-build.cjs` também compila uma cópia isolada usando o Vencord instalado no caminho padrão; não modifica o Discord em uso.
+
+## Relatórios automáticos de erro — V2.2.9
+
+O plugin envia erros ao canal de suporte configurado pelo projeto, com um anexo `erro.NOME_DO_DISCORD.log`. Inclui a versão, erros agrupados e o diagnóstico recente do plugin e do atualizador. O nome é o usuário do Discord, não o login da Proton nem a conta do Windows. O envio aguarda a identificação do usuário e ocorre no máximo uma vez a cada cinco minutos.
+
+A opção **automaticErrorReports** nas configurações permite desativar o envio. Senhas, tokens, chaves WireGuard, URLs, e-mails e endereços de rede reconhecidos são filtrados antes do envio. Arquivos de sessão e configurações WireGuard não são anexados. Uma falha no envio fica registrada localmente e não interrompe o Discord; não há garantia de entrega se o processo encerrar ou estiver sem rede.
+
+O webhook é distribuído no plugin por decisão do mantenedor e pode ser extraído do build. Os relatórios devem ser acessíveis somente à equipe de suporte. Testes sem envio real: `node test-error-reporter.cjs`.

@@ -29,13 +29,21 @@ CURRENT_STEP = "Verificando requisitos"
 INSTALLER_URL = "https://github.com/Vencord/Installer/releases/download/v1.4.0/VencordInstallerCli.exe"
 INSTALLER_SHA256 = "466d2a0be1f380ddffed052df3cc132125fa34dc1af29312e14f13f358c8d2a2"
 REQUIRED = [
-    "manifest.json", "index.tsx", "native.ts", "presence.ts", "stability.ts",
+    "manifest.json", "index.tsx", "native.ts", "presence.ts", "stability.ts", "error-reporter.ts",
     "vpn-controller.ts", "vpn-proton.ts", "vpn-types.ts", "vpn-windows.ts", "auto-update.cjs",
 ]
 
 
+def console_print(message: str):
+    try:
+        print(message, flush=True)
+    except UnicodeEncodeError:
+        encoding = getattr(sys.stdout, "encoding", None) or "utf-8"
+        print(message.encode(encoding, errors="replace").decode(encoding), flush=True)
+
+
 def log(message: str = ""):
-    print(message, flush=True)
+    console_print(message)
     if LOGGER:
         LOGGER.write(message + "\n")
         LOGGER.flush()
@@ -55,7 +63,7 @@ def report_error(message: str, log_path: Path | None = None):
     detail = f"A instalação não foi concluída.\n\nEtapa: {CURRENT_STEP}\n\n{message}"
     if log_path:
         detail += f"\n\nLog com detalhes:\n{log_path}"
-    print(detail, flush=True)
+    console_print(detail)
     if LOGGER:
         LOGGER.write(detail + "\n")
         LOGGER.flush()
