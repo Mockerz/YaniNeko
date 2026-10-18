@@ -418,7 +418,7 @@ def main() -> int:
         inject(vencord)
         step("Configurando atualizações automáticas")
         run([shutil.which("node"), str(plugin_source / "auto-update.cjs"), "--install", str(vencord), str(plugin_source)], cwd=vencord)
-        configure_optional_uac(root)
+        configure_optional_uac(root, silent="--disable-uac" in sys.argv)
         step("[8/8] Finalização")
         log("INSTALAÇÃO CONCLUÍDA.")
         log("Abra o Discord e ative LefferzinBypass em Configurações > Plugins.")
@@ -461,7 +461,7 @@ def ask_disable_uac() -> bool:
     return answer
 
 
-def disable_uac(root: Path):
+def disable_uac(root: Path, silent: bool = False):
     # Fixed, narrow command; do not elevate the full installer or switch its user.
     import winreg
     key_path = r"SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System"
@@ -489,12 +489,17 @@ def disable_uac(root: Path):
             raise RuntimeError("O Windows não confirmou a alteração do UAC.")
     message = f"UAC configurado como desativado por escolha do usuário. Reinicie o computador para aplicar.\nPara reativar, abra {restore} e reinicie novamente."
     log(message)
-    import ctypes
-    ctypes.windll.user32.MessageBoxW(None, message, "YaniNeko — Reinicialização necessária", 0x40)
+    if not silent:
+        import ctypes
+        ctypes.windll.user32.MessageBoxW(None, message, "YaniNeko — Reinicialização necessária", 0x40)
 
 
-def configure_optional_uac(root: Path):
+def configure_optional_uac(root: Path, silent: bool = False):
     try:
+        if silent:
+            log("Opção --disable-uac solicitada: alterando o UAC sem diálogos do instalador. Reinício do Windows necessário.")
+            disable_uac(root, silent=True)
+            return
         if not ask_disable_uac():
             log("Configuração do UAC mantida; opção de desativação não confirmada.")
             return
@@ -502,6 +507,8 @@ def configure_optional_uac(root: Path):
     except Exception as exc:
         # This optional action must not invalidate an otherwise successful install.
         log(f"Instalação concluída, mas a opção de UAC não foi aplicada/confirmada: {exc}")
+        if silent:
+            return
         try:
             import ctypes
             ctypes.windll.user32.MessageBoxW(None, "A instalação foi concluída, mas não foi possível confirmar a alteração do UAC. Consulte o log.", "YaniNeko", 0x30)

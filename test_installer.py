@@ -31,6 +31,18 @@ class InstallerTests(unittest.TestCase):
             installer.configure_optional_uac(self.root)
             change.assert_not_called()
 
+    def test_silent_uac_skips_dialog_only_when_explicitly_requested(self):
+        with patch.object(installer, "ask_disable_uac") as ask, patch.object(installer, "disable_uac") as change:
+            installer.configure_optional_uac(self.root, silent=True)
+            ask.assert_not_called()
+            change.assert_called_once_with(self.root, silent=True)
+
+    def test_silent_uac_failure_does_not_open_dialog(self):
+        with patch.object(installer, "disable_uac", side_effect=RuntimeError("cancelado")), \
+             patch("ctypes.windll.user32.MessageBoxW") as dialog:
+            installer.configure_optional_uac(self.root, silent=True)
+            dialog.assert_not_called()
+
     def test_uac_requires_explicit_selection(self):
         with patch.object(installer, "ask_disable_uac", return_value=True), patch.object(installer, "disable_uac") as change:
             installer.configure_optional_uac(self.root)
