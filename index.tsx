@@ -32,7 +32,7 @@ const logger = new Logger("Lefferzin Bypass");
 function showToast(message: string, type: "message" | "success" | "failure" = "message"): void {
     if (type === "failure") reportError(message);
     try {
-        discordShowToast(message, type);
+        discordShowToast({ text: message, variant: type === "failure" ? "critical" : type === "success" ? "success" : "default" });
     } catch (error) {
         recordError("Falha ao exibir notificação", error);
     }
@@ -44,13 +44,17 @@ function recordError(message: string, error?: unknown): void {
 }
 
 function syncReportUsername(): void {
-    void Native?.setReportUsername(UserStore.getCurrentUser()?.username ?? "").catch(() => {});
+    try {
+        void Native?.setReportUsername?.(UserStore.getCurrentUser()?.username ?? "").catch(() => {});
+    } catch { /* Reporting must never prevent a notification or plugin startup. */ }
 }
 
 function reportError(message: string, error?: unknown): void {
     syncReportUsername();
     const detail = error instanceof Error ? error.message : error == null ? "" : String(error);
-    void Native?.reportRendererError(`${message}${detail ? `: ${detail}` : ""}`).catch(() => {});
+    try {
+        void Native?.reportRendererError?.(`${message}${detail ? `: ${detail}` : ""}`).catch(() => {});
+    } catch { /* Older native builds may not expose error reporting yet. */ }
 }
 
 let updateNotificationTimer: ReturnType<typeof setInterval> | null = null;
@@ -76,6 +80,7 @@ function startUpdateNotifications(isCurrent: () => boolean): void {
                     case "ready": showToast("Atualização pronta! O Discord vai reiniciar automaticamente em cerca de 10 segundos, inclusive durante chamadas.", "success"); break;
                     case "current": showToast("Lefferzin Bypass já está atualizado.", "success"); break;
                     case "error": showToast("Não foi possível preparar a atualização. A versão atual foi mantida; confira o log do atualizador.", "failure"); break;
+                    case "restart_delayed": showToast("Atualização pronta, mas não foi possível encerrar a VPN. Reinício adiado; nova tentativa em 1 minuto.", "failure"); break;
                 }
             }
         } catch { /* Older native builds may not expose notifications until restart. */ }
@@ -158,10 +163,10 @@ function notifyVpnStatus(status: Partial<PluginVpnStatus> | null): void {
     if (status.active && (!previous?.active || previous.routeId !== routeId)) {
         const ping = typeof status.pingMs === "number" ? ` (${Math.round(status.pingMs)} ms)` : "";
         showToast(`VPN conectada pela ${route}${ping}.`, "success");
-    } else if (!status.active && previous?.active) {
-        showToast("VPN desconectada. O tráfego voltou para a rede normal.", toastType);
     } else if (status.state === "blocked_external" || status.state === "recovery_required") {
-        showToast(`VPN não iniciou: ${status.message || status.externalReason || "é necessária uma recuperação"}.`, "failure");
+        showToast(`VPN indisponível: ${status.message || status.externalReason || "é necessária uma recuperação"}.`, "failure");
+    } else if (!status.active && previous?.active) {
+        showToast("VPN desconectada.", toastType);
     }
 }
 
@@ -215,7 +220,7 @@ async function refreshPresenceStatus(): Promise<void> {
             stopPresence();
         }
     } catch (error) {
-        recordError("Falha ao atualizar o status global do Presence", error);
+        if (pluginRunning && generation === pluginGeneration) recordError("Falha ao atualizar o status global do Presence", error);
     } finally {
         presenceStatusBusy = false;
     }
@@ -1117,12 +1122,13 @@ export default definePlugin({
         },
 
         LOGOUT() {
-            void Native?.setReportUsername("").catch(() => {});
+            try { void Native?.setReportUsername?.("").catch(() => {}); } catch { /* Optional on older builds. */ }
             record("voce saiu da conta; a VPN do plugin permanece isolada e nao troca a rota automaticamente");
         }
     },
 
     start() {
+        lastVpnNotification = null;
         syncReportUsername();
         pluginRunning = true;
         const generation = ++pluginGeneration;

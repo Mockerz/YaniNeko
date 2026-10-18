@@ -12,7 +12,7 @@ function fixture(result = { success: true }) {
     const data = { active: { pid: 123, active: "b".repeat(40) }, pending: { id: "a".repeat(40) } };
     const context = {
         __dirname: __dirname, join: path.join, dirname: path.dirname,
-        process: { pid: 123 }, Date: { now: () => now }, quitting: false,
+        process: { pid: 123 }, Date: { now: () => now }, quitting: false, restartNotifications: [],
         existsSync: () => true,
         readFileSync: file => JSON.stringify(file.endsWith("active.json") ? data.active : data.pending),
         controller: { isRelaunching: () => false, shutdown: async (...args) => { calls.push(["shutdown", ...args]); return result; } },
@@ -34,6 +34,7 @@ function fixture(result = { success: true }) {
     await f.tick(); f.time(10000); await f.tick();
     assert.deepEqual(f.calls, [["shutdown", false, false]]);
     assert.equal(f.context.quitting, false);
+    assert.equal(f.context.restartNotifications[0].phase, "restart_delayed");
     f.time(69999); await f.tick(); assert.equal(f.calls.length, 1);
     f.time(70000); await f.tick(); assert.equal(f.calls.length, 2);
 

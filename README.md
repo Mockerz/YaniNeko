@@ -69,7 +69,7 @@ Para publicar uma alteração do plugin, basta fazer push na `main`. Não precis
 
 O executável é distribuído pela release do GitHub e o BAT valida seu SHA256 antes de executá-lo. Se alterar `instalar_yanineko.py`, recompile `YaniNeko-Installer.exe`, publique-o na release e atualize a URL e o SHA256 em `BypassDiscord.bat` antes do push. O EXE gerado não entra no Git. Alterações apenas no plugin não exigem recompilar o instalador.
 
-Publicação preparada: o BAT aponta para a release **4.0.1** do instalador, com correção de saída em consoles Windows com codificação antiga. Anexe o novo `YaniNeko-Installer.exe` a essa release ao publicar estes fontes; o download pelo BAT depende desse asset. SHA256 esperado: `FA33C5B4F5E113FF6DB1E605F1BF11401CCE4D361A02C5656B9C369EC953FF06`. A versão do plugin permanece **2.2.9**.
+O instalador usa sempre a release **4.0.0**. Quando recompilar, substitua o asset `YaniNeko-Installer.exe` nessa mesma release e atualize o SHA256 no BAT; não crie uma nova tag para o instalador. O EXE preparado inclui a correção de saída em consoles Windows com codificação antiga. SHA256 esperado: `FA33C5B4F5E113FF6DB1E605F1BF11401CCE4D361A02C5656B9C369EC953FF06`. A versão do plugin permanece **2.2.9**.
 
 Logs e estado: `%LOCALAPPDATA%\LefferzinBypass\Vencord\.yanineko-updates`. Conta Proton e configuração da VPN são preservadas. Se uma atualização do próprio Discord remover a injeção do Vencord, será necessário executar o instalador novamente.
 

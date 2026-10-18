@@ -33,10 +33,12 @@ const VPN_DATA_DIR = defaultPluginVpnDataDir();
 const GUI_DATA_DIR = dirname(VPN_DATA_DIR);
 const LOG_FILE = join(VPN_DATA_DIR, "plugin-vpn.log");
 const ROUTE_INFO_FILE = join(VPN_DATA_DIR, "route-info.json");
+const restartNotifications: { id: string; at: number; phase: string }[] = [];
 
 export function getAutoUpdateNotifications(_: IpcMainInvokeEvent, since: unknown) {
     const events: { id: string; at: number; phase: string }[] = [];
     if (typeof since !== "number" || !Number.isFinite(since)) return events;
+    events.push(...restartNotifications.filter(event => event.at >= since));
     // Works for both dist/ and the versioned .yanineko-updates/releases/<id>/.
     let directory = __dirname;
     for (let depth = 0; depth < 6; depth++) {
@@ -657,6 +659,8 @@ function startAutomaticUpdateRestart(): void {
         } catch (error) {
             quitting = false;
             restartAt = Date.now() + 60_000;
+            restartNotifications.push({ id: `restart-delayed-${Date.now()}`, at: Date.now(), phase: "restart_delayed" });
+            if (restartNotifications.length > 20) restartNotifications.shift();
             log("error", "reinício para atualização adiado; nova tentativa em 1 minuto", { erro: safeDiagnosticDetail(error) });
         } finally { busy = false; }
     }, 2_000);
