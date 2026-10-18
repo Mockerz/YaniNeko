@@ -47,6 +47,6 @@ const { ErrorReporter, redactReport, reportFilename, validWebhook } = mod.export
     reporter.capture("logout error"); reporter.setUsername(""); reporter.setUsername("joao123");
     await reporter.flush(); assert.equal(sends.length, 4);
     // Source wiring is bundled as a separate check, with no network delivery.
-    esbuild.buildSync({ entryPoints: [path.join(__dirname, "index.tsx"), path.join(__dirname, "native.ts")], bundle: true, packages: "external", platform: "node", format: "cjs", outdir: path.join(__dirname, "build/report-validation"), logLevel: "warning" });
+    esbuild.buildSync({ entryPoints: [path.join(__dirname, "index.tsx"), path.join(__dirname, "native.ts")], bundle: true, packages: "external", platform: "node", format: "cjs", write: false, outdir: path.join(__dirname, "build/report-validation"), logLevel: "warning" });
     console.log("PASS: redaction, filename, endpoint validation, grouping, cooldown, opt-out, rate limit, failure isolation, plugin bundling; no real webhook messages sent");
 })().catch(error => { console.error(error); process.exitCode = 1; });

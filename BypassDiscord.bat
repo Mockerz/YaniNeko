@@ -5,7 +5,7 @@ title YaniNeko - Baixar e instalar
 
 :: Discord e instalado por usuario. Nao trocar a conta via elevacao automatica.
 
-set "URL=https://github.com/Mockerz/YaniNeko/releases/download/4.0.1/YaniNeko-Installer.exe"
+set "URL=https://github.com/Mockerz/YaniNeko/releases/download/4.0.0/YaniNeko-Installer.exe"
 set "OUT=%TEMP%\YaniNeko-Installer-auto-%RANDOM%-%RANDOM%.exe"
 
 :: Permite testar a recompilacao antes de publicar a nova release.
