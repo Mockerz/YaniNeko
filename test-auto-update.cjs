@@ -54,6 +54,7 @@ const sha = "a".repeat(40);
         await updater.fetchSource(path.join(root, "source"), sha, get);
         await assert.rejects(updater.fetchSource(path.join(root, "bad-source"), sha, async url => url.includes("git/trees") ? get(url) : Buffer.from("tampered")), /hash mismatch/);
         assert.equal(updater.pluginFile("tests/file.ts"), false);
+        assert.equal(updater.pluginFile("server/server.cjs"), false);
         assert.equal(updater.pluginFile("vpn-controller.ts"), true);
         // A new Discord launch checks even when the previous launch checked recently.
         const activePath = path.join(root, ".yanineko-updates/active.json");

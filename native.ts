@@ -5,6 +5,7 @@
  */
 
 import { RendererSettings } from "@main/settings";
+import { randomUUID } from "crypto";
 import { app, BrowserWindow, ipcMain, type IpcMainEvent, type IpcMainInvokeEvent } from "electron";
 import {
     appendFileSync,
@@ -34,6 +35,46 @@ const GUI_DATA_DIR = dirname(VPN_DATA_DIR);
 const LOG_FILE = join(VPN_DATA_DIR, "plugin-vpn.log");
 const ROUTE_INFO_FILE = join(VPN_DATA_DIR, "route-info.json");
 const restartNotifications: { id: string; at: number; phase: string }[] = [];
+const ONLINE_COUNTER_URL = "https://problem-important-specimen.ngrok-free.dev";
+let counterRequest: Promise<number | null> | null = null;
+let counterLastAttempt = 0;
+let counterValue: number | null = null;
+
+export async function heartbeatOnlineCounter(_: IpcMainInvokeEvent): Promise<number | null> {
+    if (!pluginEnabled() || pluginSettings().participateOnlineCounter === false) {
+        counterValue = null;
+        return null;
+    }
+    if (counterRequest) return counterRequest;
+    if (Date.now() - counterLastAttempt < 60000) return counterValue;
+    counterLastAttempt = Date.now();
+    counterRequest = (async () => {
+        try {
+            const file = join(VPN_DATA_DIR, "online-installation-id.txt");
+            let id = "";
+            try { id = readFileSync(file, "utf8").trim(); } catch {}
+            if (!/^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/i.test(id)) {
+                id = randomUUID();
+                mkdirSync(VPN_DATA_DIR, { recursive: true });
+                writeFileSync(file, id, { encoding: "utf8", mode: 0o600 });
+            }
+            const response = await fetch(`${ONLINE_COUNTER_URL}/heartbeat`, {
+                method: "POST", redirect: "error", signal: AbortSignal.timeout(8000),
+                headers: { "Content-Type": "application/json", "ngrok-skip-browser-warning": "1" },
+                body: JSON.stringify({ installationId: id }),
+            });
+            if (!response.ok) throw new Error("Counter unavailable");
+            const result = await response.json();
+            if (!Number.isSafeInteger(result?.online) || result.online < 0 || result.online > 100000) throw new Error("Invalid counter");
+            counterValue = pluginSettings().participateOnlineCounter === false ? null : result.online;
+        } catch {
+            // Optional presence data must not affect the VPN or trigger support reports.
+            counterValue = null;
+        }
+        return counterValue;
+    })();
+    try { return await counterRequest; } finally { counterRequest = null; }
+}
 
 export function getAutoUpdateNotifications(_: IpcMainInvokeEvent, since: unknown) {
     const events: { id: string; at: number; phase: string }[] = [];

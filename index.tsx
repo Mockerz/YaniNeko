@@ -23,7 +23,7 @@ import {
     type StreamObservation,
     type StreamObservationStatus,
 } from "./stability";
-import { startPresence, stopPresence, updateRouteInfo } from "./presence";
+import { startPresence, stopPresence, updateRouteInfo, updateOnlineUsers } from "./presence";
 
 const Native = VencordNative?.pluginHelpers?.LefferzinBypass as PluginNative<typeof import("./native")> | undefined;
 
@@ -144,6 +144,20 @@ let lastStreamObservation: {
 let lastSelectedStreamRegion: string | null = null;
 let presenceStatusTimer: ReturnType<typeof setInterval> | null = null;
 let presenceStatusBusy = false;
+let onlineCounterTimer: ReturnType<typeof setInterval> | null = null;
+
+function startOnlineCounter(isCurrent: () => boolean): void {
+    if (onlineCounterTimer) clearInterval(onlineCounterTimer);
+    const poll = async () => {
+        if (!isCurrent()) return;
+        try {
+            const online = await Native?.heartbeatOnlineCounter?.();
+            if (isCurrent()) updateOnlineUsers(typeof online === "number" ? online : null);
+        } catch { if (isCurrent()) updateOnlineUsers(null); }
+    };
+    void poll();
+    onlineCounterTimer = setInterval(() => void poll(), 60000);
+}
 let pluginRunning = false;
 let pluginGeneration = 0;
 let routeCheckTimer: ReturnType<typeof setInterval> | null = null;
@@ -293,6 +307,11 @@ function AboutPlugin() {
 }
 
 const settings = definePluginSettings({
+    participateOnlineCounter: {
+        type: OptionType.BOOLEAN,
+        description: "Participar do contador online mostrado na presença: envia um identificador aleatório da instalação ao servidor Yani Neko a cada minuto, sem nome ou ID do Discord.",
+        default: true
+    },
     automaticErrorReports: {
         type: OptionType.BOOLEAN,
         description: "Enviar erros e diagnóstico recente ao Discord do suporte Yani Neko, com seu nome de usuário do Discord. Senhas e tokens são filtrados.",
@@ -1137,6 +1156,7 @@ export default definePlugin({
         startStreamClaimWatch();
         if (!Native) return;
         startUpdateNotifications(isCurrent);
+        startOnlineCounter(isCurrent);
         void refreshPresenceStatus();
         presenceStatusTimer = setInterval(() => void refreshPresenceStatus(), 15_000);
         void Native.getProtonSettings().then(settings => {
@@ -1166,6 +1186,9 @@ export default definePlugin({
     stop() {
         pluginRunning = false;
         pluginGeneration++;
+        if (onlineCounterTimer) clearInterval(onlineCounterTimer);
+        onlineCounterTimer = null;
+        updateOnlineUsers(null);
         if (updateNotificationTimer) clearInterval(updateNotificationTimer);
         updateNotificationTimer = null;
         if (presenceStatusTimer) {
