@@ -9,7 +9,7 @@ const transform = source => esbuild.transformSync(source, { loader: "ts", format
     const native = fs.readFileSync(path.join(__dirname, "native.ts"), "utf8");
     const mod = { exports: {} };
     vm.runInNewContext(transform(native.slice(native.indexOf("const ONLINE_COUNTER_URL"), native.indexOf("export function getAutoUpdateNotifications"))), {
-        module: mod, exports: mod.exports, Date: { now: () => now }, AbortSignal,
+        module: mod, exports: mod.exports, Date: { now: () => now }, AbortSignal, manifest: { version: "2.3.8" },
         log() {}, safeDiagnosticDetail: String,
         pluginEnabled: () => enabled, pluginSettings: () => ({ participateOnlineCounter: false }),
         join: path.join, VPN_DATA_DIR: "test", mkdirSync() {},
@@ -19,7 +19,8 @@ const transform = source => esbuild.transformSync(source, { loader: "ts", format
         fetch: async (_, options) => {
             calls++;
             const payload = JSON.parse(options.body);
-            assert.ok(Object.keys(payload).every(key => ["installationId", "username", "sessionId", "route"].includes(key)));
+            assert.ok(Object.keys(payload).every(key => ["installationId", "username", "sessionId", "route", "version"].includes(key)));
+            assert.equal(payload.version, "2.3.8");
             if (payload.route) { assert.equal(payload.route.server, "BR-1"); assert.equal(payload.route.country, "BR"); }
             assert.ok(!options.body.includes("private-config"));
             assert.equal(payload.sessionId, "12345678-1234-4123-8123-123456789abc");
