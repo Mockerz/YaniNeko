@@ -4,7 +4,6 @@ import os
 import subprocess
 import tempfile
 import unittest
-import types
 from pathlib import Path
 from unittest.mock import patch
 
@@ -26,60 +25,34 @@ class InstallerTests(unittest.TestCase):
         file.write_text("test")
         return file
 
-    def test_uac_is_unchanged_without_selection(self):
-        with patch.object(installer, "ask_disable_uac", return_value=False), patch.object(installer, "disable_uac") as change:
-            installer.configure_optional_uac(self.root)
-            change.assert_not_called()
-
-    def test_silent_uac_skips_dialog_only_when_explicitly_requested(self):
-        with patch.object(installer, "ask_disable_uac") as ask, patch.object(installer, "disable_uac") as change:
-            installer.configure_optional_uac(self.root, silent=True)
-            ask.assert_not_called()
-            change.assert_called_once_with(self.root, silent=True)
-
-    def test_silent_uac_failure_does_not_open_dialog(self):
-        with patch.object(installer, "disable_uac", side_effect=RuntimeError("cancelado")), \
-             patch("ctypes.windll.user32.MessageBoxW") as dialog:
-            installer.configure_optional_uac(self.root, silent=True)
-            dialog.assert_not_called()
-
-    def test_uac_requires_explicit_selection(self):
-        with patch.object(installer, "ask_disable_uac", return_value=True), patch.object(installer, "disable_uac") as change:
+    def test_uac_is_configured_without_an_installer_confirmation(self):
+        with patch.object(installer, "disable_uac") as change:
             installer.configure_optional_uac(self.root)
             change.assert_called_once_with(self.root)
 
-    def test_uac_denial_does_not_fail_installation(self):
-        with patch.object(installer, "ask_disable_uac", return_value=True), \
-             patch.object(installer, "disable_uac", side_effect=RuntimeError("cancelado")), \
-             patch("ctypes.windll.user32.MessageBoxW"):
+    def test_uac_failure_does_not_fail_installation(self):
+        with patch.object(installer, "disable_uac", side_effect=RuntimeError("cancelado")), \
+             patch.object(installer, "log") as log:
             installer.configure_optional_uac(self.root)
+            log.assert_called_once()
 
-    def test_uac_dialog_defaults_to_unchecked(self):
-        values = []
-        class Widget:
-            def __init__(self, *args, **kwargs): pass
-            def __getattr__(self, name): return lambda *args, **kwargs: None
-        fake = types.SimpleNamespace(Tk=Widget, BooleanVar=lambda value: values.append(value))
-        fake.ttk = types.SimpleNamespace(Frame=Widget, Label=Widget, Checkbutton=Widget, Button=Widget)
-        with patch.dict("sys.modules", {"tkinter": fake, "tkinter.ttk": fake.ttk}):
-            self.assertFalse(installer.ask_disable_uac())
-        self.assertEqual(values, [False])
-
-    def test_uac_change_is_scoped_verified_and_has_restore_file(self):
+    def test_uac_change_uses_requested_values_and_has_restore_file(self):
         from unittest.mock import MagicMock
         registry = MagicMock()
-        registry.QueryValueEx.side_effect = [(1, 4), (0, 4)]
+        registry.QueryValueEx.side_effect = [(5, 4), (1, 4), (0, 4), (0, 4)]
         registry.KEY_READ = 1; registry.KEY_WOW64_64KEY = 256
+        registry.REG_DWORD = 4
         with patch.dict("sys.modules", {"winreg": registry}), \
-             patch.object(installer.subprocess, "run", return_value=subprocess.CompletedProcess([], 0)) as run, \
-             patch("ctypes.windll.user32.MessageBoxW"):
+             patch.object(installer.subprocess, "run", return_value=subprocess.CompletedProcess([], 0)) as run:
             installer.disable_uac(self.root)
         command = run.call_args.args[0]
         self.assertIn("-Verb RunAs", command[-1])
-        self.assertIn("'EnableLUA'", command[-1])
-        self.assertNotIn("ConsentPromptBehaviorAdmin", command[-1])
-        self.assertIn('"EnableLUA"=dword:00000001', (self.root / "Reativar-UAC.reg").read_text(encoding="utf-16"))
-        self.assertEqual(registry.QueryValueEx.call_count, 2)
+        self.assertIn("IMPORT", command[-1])
+        restore = (self.root / "Reativar-UAC.reg").read_text(encoding="utf-16")
+        self.assertIn('"ConsentPromptBehaviorAdmin"=dword:00000005', restore)
+        self.assertIn('"PromptOnSecureDesktop"=dword:00000001', restore)
+        self.assertFalse((self.root / "Configurar-UAC.reg").exists())
+        self.assertEqual(registry.QueryValueEx.call_count, 4)
 
     def test_discord_missing_and_other_channel(self):
         (self.root / "DiscordCanary").mkdir()
