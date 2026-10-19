@@ -1,109 +1,62 @@
 # YaniNeko — LefferzinBypass
 
-Plugin para Discord com Vencord que usa a Proton VPN para configurar uma rota alternativa para a conexão do Discord.
+Plugin para Discord com Vencord que utiliza a Proton VPN para criar uma rota alternativa de conexão, sem afetar os outros aplicativos do computador.
 
-## Como funciona
+## Instalação
 
-Você entra na sua conta Proton pelo plugin, e ele prepara uma conexão VPN usando o WireSock. O tráfego do Discord passa pela rota selecionada, com filtro por aplicativo.
+1. Baixe o arquivo `BypassDiscord.bat`.
+2. Clique com o botão direito e selecione **Executar como administrador**.
+3. Aguarde a instalação terminar.
+4. Abra o Discord e acesse **Configurações → Vencord → Plugins**.
+5. Procure por **LefferzinBypass** e ative o plugin.
 
-A opção **Otimizar rotas** compara servidores disponíveis e testa a conexão para escolher uma rota. O plugin também permite consultar o status, o servidor e o ping, além de trocar a rota pelas configurações. O resultado depende da sua internet e da disponibilidade dos servidores.
+## Como usar
 
-## Antes de começar
+1. Abra as configurações do **LefferzinBypass**.
+2. Entre com sua conta Proton VPN.
+3. Informe o código de verificação (2FA), caso seja solicitado.
+4. Clique em **Logar**.
+5. Utilize **Otimizar rotas** para encontrar uma conexão adequada.
+6. Aguarde o Discord reiniciar automaticamente.
 
-- Tenha o Discord instalado no Windows.
-- Tenha uma conta Proton e acesso ao código de autenticação em duas etapas (2FA), caso esteja ativado.
-- Use o arquivo **BypassDiscord.bat** para iniciar a instalação.
+**Pronto!** O Discord estará utilizando a rota VPN configurada.
 
-Não é necessário instalar Git, Node.js ou Python manualmente ao usar o EXE. O instalador prepara Git e Node.js portáteis quando necessário e instala o pnpm na pasta do usuário, sem depender do Corepack. As ferramentas ficam em `%LOCALAPPDATA%\LefferzinBypass\tools` e são reaproveitadas nas próximas instalações. É necessário acesso à internet para os downloads.
+A otimização não precisa ser repetida a cada inicialização. Utilize novamente apenas quando desejar melhorar ou trocar sua conexão.
 
-Se o Discord Stable não for encontrado, o instalador para antes de baixar as ferramentas e explica como corrigir. No EXE, falhas também abrem uma janela com a etapa, o motivo e o caminho do log. Discord Canary e PTB não são usados como substitutos do Stable.
+## Atualizações automáticas
 
-## Passo a passo
+O plugin verifica automaticamente se existem novas atualizações.
 
-1. **Executar como administrador**
-   - Clique com o botão direito em **BypassDiscord.bat** e selecione **Executar como administrador**.
-   - Aguarde o instalador abrir e concluir a instalação.
+Quando uma atualização estiver disponível, ela será instalada e o Discord reiniciará automaticamente.
 
-2. **Acessar os plugins no Discord**
-   - Abra o Discord e entre em **Configurações do usuário** (ícone de engrenagem).
-   - Na seção do Vencord, clique em **Plugins**.
+Não é necessário baixar ou instalar o plugin novamente para receber atualizações normais.
 
-3. **Ativar o plugin**
-   - Pesquise por **LefferzinBypass**.
-   - Ative o plugin, caso ainda esteja desativado.
+## Solução de problemas
 
-4. **Entrar na conta Proton**
-   - Clique na engrenagem de configuração do plugin.
-   - Insira seu **e-mail ou usuário** e sua **senha** da Proton.
-   - Se usar autenticação em duas etapas, preencha também o **código 2FA**.
-   - Clique em **Logar** e aguarde a confirmação de login e ativação do bypass.
-   - O plugin tenta ativar a conexão automaticamente. Se informar que o bypass ainda não foi ativado, use **Start Bypass**.
+**O plugin não aparece no Discord?**
 
-5. **Otimizar rotas na primeira configuração**
-   - Clique em **Otimizar rotas**.
-   - Aceite as permissões solicitadas pelo Windows para concluir a configuração.
-   - Aguarde a conclusão dos testes e a aplicação da rota.
-   - **Não é necessário repetir esse passo a cada uso.** Você pode otimizar novamente se precisar trocar ou melhorar a rota.
+Feche completamente o Discord e abra novamente. Se necessário, execute o instalador outra vez.
 
-6. **Finalizar**
-   - Após a otimização, aguarde cerca de **30 segundos** para o Discord reiniciar automaticamente. O tempo pode variar.
-   - Se ficar preso em **Checking for updates** por mais de **5 segundos**, feche completamente o Discord, inclusive pelo ícone ao lado do relógio, e abra novamente.
-   - Confira nas configurações do plugin se a conexão está ativa. Pronto!
+**Não consigo entrar na Proton VPN.**
 
-## Dúvidas rápidas
+Verifique seu usuário, senha e código de autenticação.
 
-Ao concluir a instalação, o instalador aplica `ConsentPromptBehaviorAdmin=0` e `PromptOnSecureDesktop=0` se ainda não estiverem configurados, sem abrir uma janela extra de confirmação. O Windows ainda pode mostrar o pedido padrão de autorização de administrador para aplicar a alteração. Reinicie o computador para que ela entre em vigor. O instalador mantém `EnableLUA` inalterado e, quando faz uma alteração, salva os valores anteriores em `%LOCALAPPDATA%\LefferzinBypass\Reativar-UAC.reg`; abra esse arquivo, autorize e reinicie para restaurá-los. Essa configuração pertence ao instalador, não às atualizações automáticas do plugin.
+**O bypass não está funcionando.**
 
-- **O plugin não aparece?** Confira se o instalador terminou sem erros e reabra o Discord.
-- **O login falhou?** Confira o usuário, a senha e o código 2FA, se houver.
-- **A conexão não está ativa?** Abra as configurações do plugin, confira a mensagem de status e clique em **Start Bypass**, se necessário.
-- **Onde ficam os logs da instalação?** Em `%LOCALAPPDATA%\LefferzinBypass\logs`.
+Abra as configurações do plugin e clique em **Start Bypass**.
 
-## Atualização automática (a partir da V1.1.0)
+**A conexão está lenta ou com ping alto.**
 
-Instale uma vez usando o **novo BypassDiscord.bat** ou **YaniNeko-Installer.exe** da release. Quem já usava uma versão antiga também precisa executar este instalador uma vez. Depois, o plugin verifica novos commits na `main` cerca de 30 segundos após abrir o Discord e, por padrão, a cada 3 horas enquanto ele estiver aberto. Nas configurações do plugin, a pessoa também pode escolher uma verificação diária. O painel do servidor permite solicitar uma verificação imediata para uma instalação online.
+Utilize **Otimizar rotas** para procurar uma conexão melhor.
 
-O download fica preso a um único commit, os arquivos são conferidos pelos hashes do GitHub e o Vencord é compilado em uma pasta separada, usando as dependências da instalação. Quando a atualização fica pronta, aparece um aviso e o Discord reinicia automaticamente após cerca de 10 segundos, inclusive durante chamadas e transmissões. O plugin preserva a sessão WireSock ativa durante esse reinício e transfere o controle para a nova instância; assim, a atualização não deve desligar e ligar a VPN de novo nem pedir autorização de administrador só por causa do reinício. Se a VPN já estiver inativa, a próxima ativação ainda pode exigir autorização do Windows. Se não for possível transferir o controle da sessão, a atualização automática é suspensa. Ctrl+R não é necessário.
+**O Discord ficou preso em "Checking for updates".**
 
-Se a internet, o GitHub ou a compilação falhar, a versão atual continua funcionando. Uma falha síncrona ao iniciar o novo build restaura a versão anterior para a abertura seguinte. Isso não detecta todos os erros que possam aparecer durante o uso. O atualizador próprio do Vencord fica desativado para não sobrescrever este build personalizado; atualizações da base do Vencord continuam exigindo o instalador.
+Feche completamente o Discord, inclusive pela bandeja do Windows, e abra novamente.
 
-Para publicar uma alteração do plugin, basta fazer push na `main`. Não precisa criar uma release. Atualize `version` no `manifest.json` quando quiser mudar o número mostrado em **Bypass de Tela/Cam - V1.1.0**. O número exibido vem do build carregado; a detecção de atualizações usa o commit.
+**Onde encontro os logs?**
 
-O executável é distribuído pela release do GitHub e o BAT valida seu SHA256 antes de executá-lo. Se alterar `instalar_yanineko.py`, recompile `YaniNeko-Installer.exe`, publique-o na release e atualize a URL e o SHA256 em `BypassDiscord.bat` antes do push. O EXE gerado não entra no Git. Alterações apenas no plugin não exigem recompilar o instalador.
+Os logs de instalação ficam em:
 
-O instalador usa sempre a release **4.0.0**. Quando recompilar, substitua o asset `YaniNeko-Installer.exe` nessa mesma release e atualize o SHA256 único no BAT; não crie uma nova tag para o instalador. O EXE preparado inclui a correção de saída em consoles Windows com codificação antiga. SHA256 do build atual: `D87587548DF398453FBE980357A903D9D7179E9C4D07A95B476974A1B508E582`. A versão do plugin neste código é **2.3.11**.
+`%LOCALAPPDATA%\LefferzinBypass\logs`
 
-Logs e estado: `%LOCALAPPDATA%\LefferzinBypass\Vencord\.yanineko-updates`. Conta Proton e configuração da VPN são preservadas. Se uma atualização do próprio Discord remover a injeção do Vencord, será necessário executar o instalador novamente.
-
-Na V2.3.8, o heartbeat informa a versão do plugin para o painel privado do servidor.
-
-Na V2.3.9, o reinício para atualizar o plugin mantém o WireSock ativo e transfere o ownership para a nova instância, evitando uma reconexão que podia disparar um pedido UAC.
-
-Na V2.3.10, uma falha ao configurar o reinício automático do serviço WireSock gera um aviso e não impede sua ativação. Os logs preservam o erro original do Windows e distinguem cancelamento, acesso negado, tempo esgotado e falha de execução do PowerShell. Se a autorização falhar, a tentativa automática é pausada; use **Start Bypass** para tentar novamente. A atualização é do plugin e não exige recompilar o instalador 4.0.0.
-
-Na V2.3.7, o PowerShell elevado executa o script por arquivo temporário, evitando limites de tamanho da linha de comando. O serviço WireSock recebe ações de recuperação do Windows e o plugin agenda novas tentativas quando a VPN cai. Se a autorização de administrador for cancelada ou negada, as tentativas param para não abrir vários pedidos de UAC; é necessário autorizar a próxima ativação. O Windows não permite contornar essa autorização com segurança.
-
-A partir da V2.2.8, marcadores de atualização inválidos e builds preparados corrompidos são movidos para a subpasta `quarantine`, com o motivo registrado em `updater.log`. O atualizador pode preparar outra cópia sem ficar preso à tentativa anterior. As versões ativa e de retorno não são substituídas por essa recuperação.
-
-Validação de desenvolvimento: `node test-auto-update.cjs`. O teste `node validate-update-build.cjs` também compila uma cópia isolada usando o Vencord instalado no caminho padrão; não modifica o Discord em uso.
-
-Para instalar as alterações desta pasta sem fazer push, execute **InstalarLocal.bat**. Ele chama `instalar_local.py`, usa os fontes locais, reaproveita o Vencord e as ferramentas existentes e fecha o Discord Stable ao aplicar o build. A instalação local pausa as atualizações do GitHub para preservar seu teste. Para voltar às atualizações automáticas, reinstale com `InstalarLocal.bat --auto-update` ou use o instalador normal. `InstalarLocal.bat --check` apenas valida os arquivos; a primeira preparação ainda pode precisar de internet para baixar dependências e o injetor oficial.
-
-## Relatórios automáticos de erro — V2.2.9
-
-O plugin envia erros ao canal de suporte configurado pelo projeto, com um anexo `erro.NOME_DO_DISCORD.log`. Inclui a versão, erros agrupados e o diagnóstico recente do plugin e do atualizador. O nome é o usuário do Discord, não o login da Proton nem a conta do Windows. O envio aguarda a identificação do usuário e ocorre no máximo uma vez a cada cinco minutos.
-
-Os relatórios de erro ficam sempre ativos, sem opção de desativação nas configurações. Preferências antigas de desativação não são mais utilizadas. Senhas, tokens, chaves WireGuard, URLs, e-mails e endereços de rede reconhecidos são filtrados antes do envio. Arquivos de sessão e configurações WireGuard não são anexados. Uma falha no envio fica registrada localmente e não interrompe o Discord; não há garantia de entrega se o processo encerrar ou estiver sem rede.
-
-Na V2.3.2, o webhook fica somente no servidor, fora do Git e do plugin. O cliente envia o relatório filtrado à API, que confirma a entrega após a resposta do Discord. Falhas são tentadas novamente, com limite de frequência. O webhook antigo deve ser desativado no Discord, pois já foi distribuído em versões anteriores. Os relatórios devem ser acessíveis somente à equipe de suporte. Testes sem envio real: `node test-error-reporter.cjs`.
-
-## Contador online — V2.2.10
-
-A partir da V2.3.0, a linha da presença que exibia o endereço do GitHub mostra `12 usuários online`, junto da informação de rota. A linha de versão permanece separada. O plugin envia um identificador aleatório por instalação e o nome de usuário do Discord a cada 30 segundos pelo processo desktop à API configurada em `native.ts`. Se a rota VPN do Discord não alcançar a API, o cliente tenta somente o heartbeat em um processo auxiliar fora da VPN; o restante do tráfego continua na rota atual. Nesse fallback, o ngrok recebe o IP público da conexão direta. Os nomes aparecem somente no painel privado `/admin`; as rotas públicas mostram apenas a quantidade. A contagem considera os últimos 3 minutos e representa instalações ativas, não pessoas únicas. A participação no contador fica sempre ativa enquanto o plugin estiver habilitado, sem opção separada nas configurações. Preferências antigas de desativação não são mais utilizadas. Falhas breves preservam a última contagem confirmada por até 3 minutos; após esse prazo aparece `Contador indisponível`. A VPN continua funcionando. A atividade oculta nas configurações do Discord não altera o heartbeat nem a contagem. O painel mostra “Sem confirmação” quando não consegue atualizar seus dados.
-
-O servidor fica em `server/`, separado do plugin e excluído do auto update. Execute-o na VPS **203.159.90.60**, onde seu ngrok já encaminha HTTPS para `localhost:3008`. Consulte `server/README.md`. Não foi feita implantação automática na VPS. Testes: `node server/test-server.cjs` e `node test-online-counter.cjs`.
-
-O painel privado mantém o histórico de instalações por 30 dias e mostra nome, online/offline, última atividade em minutos/horas/dias, rota e tempo da sessão atual. Preserve `server/.server-data` ao substituir os arquivos na VPS: ela guarda a chave de acesso e o histórico. Atualize primeiro o servidor, depois o plugin, para aceitar os campos de rota e sessão. O cronômetro público da presença foi mantido. Teste do painel: `node server/test-panel.cjs`.
-
-
-Na V2.3.2, o painel privado também permite ligar a VPN e conectar uma conta Proton no cliente online; um login bem-sucedido ativa o túnel. CAPTCHA e permissões do Windows podem exigir interação no computador de destino. Atualize o servidor antes do plugin. Instruções em server/README.md.
+Caso encontre algum problema, envie o log correspondente ao suporte do projeto.
