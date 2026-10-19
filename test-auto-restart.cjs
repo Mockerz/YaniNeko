@@ -9,12 +9,12 @@ const code = esbuild.transformSync(source, { loader: "ts", format: "cjs" }).code
 function fixture(result = { success: true }) {
     const calls = [];
     let tick, now = 0;
-    const data = { active: { pid: 123, active: "b".repeat(40) }, pending: { id: "a".repeat(40) } };
+    const data = { config: {}, active: { pid: 123, active: "b".repeat(40) }, pending: { id: "a".repeat(40) } };
     const context = {
         __dirname: __dirname, join: path.join, dirname: path.dirname,
         process: { pid: 123 }, Date: { now: () => now }, quitting: false, restartNotifications: [],
         existsSync: () => true,
-        readFileSync: file => JSON.stringify(file.endsWith("active.json") ? data.active : data.pending),
+        readFileSync: file => JSON.stringify(data[path.basename(file, ".json")]),
         controller: {
             isRelaunching: () => false,
             prepareForUpdateRelaunch: async () => { calls.push("prepare"); return result; },
@@ -50,6 +50,10 @@ function fixture(result = { success: true }) {
 
     f = fixture(); f.data.active.pid = 456;
     await f.tick(); f.time(20000); await f.tick(); assert.equal(f.calls.length, 0);
+
+    f = fixture(); f.data.config.localOnly = true;
+    await f.tick(); f.time(20000); await f.tick();
+    assert.equal(f.calls.length, 0, "local testing must ignore pending updates from an older worker");
 
     f = fixture(); await f.tick(); f.data.pending = null;
     f.time(10000); await f.tick(); assert.equal(f.calls.length, 0);

@@ -113,6 +113,10 @@ def ensure_dependencies(node: str, vencord: Path, root: Path, force: bool):
     if not force and (vencord / "node_modules/esbuild").exists():
         log("Reutilizando as dependências locais. Use --install-deps para reinstalar.")
         return
+    pnpm = root / "tools/pnpm/node_modules/pnpm/bin/pnpm.cjs"
+    if pnpm.is_file():
+        run([node, str(pnpm), "install", "--frozen-lockfile"], vencord)
+        return
     corepack = Path(node).resolve().parent / "node_modules/corepack/dist/corepack.js"
     if not corepack.is_file():
         raise RuntimeError("Corepack ausente. Prepare as dependências do Vencord com pnpm antes de continuar.")
@@ -155,6 +159,7 @@ def main(argv=None) -> int:
     parser.add_argument("--build-only", action="store_true", help="Compila sem fechar ou instalar no Discord")
     parser.add_argument("--check", action="store_true", help="Valida a origem e mostra os caminhos, sem alterações")
     parser.add_argument("--install-deps", action="store_true", help="Executa pnpm install mesmo com dependências existentes")
+    parser.add_argument("--auto-update", action="store_true", help="Permite substituir o build local por atualizações do GitHub")
     parser.add_argument("--vencord-dir", type=Path, help="Pasta de uma cópia local do Vencord")
     parser.add_argument("--no-pause", action="store_true", help="Não espera Enter ao terminar")
     args = parser.parse_args(argv)
@@ -163,13 +168,16 @@ def main(argv=None) -> int:
     try:
         hashes = validate_source(SOURCE)
         log(f"Origem LOCAL: {SOURCE}\nVencord: {vencord}\nArquivos validados: {len(hashes)}")
+        log("Atualizações do GitHub: " + ("ativadas" if args.auto_update else "pausadas para preservar o teste local"))
         if args.check:
             return 0
         if os.name != "nt" or platform.machine().lower() not in ("amd64", "x86_64"):
             raise RuntimeError("Este instalador exige Windows x64.")
-        node = shutil.which("node")
+        portable_nodes = sorted((root / "tools/node").glob("*/node.exe"))
+        node = str(portable_nodes[-1]) if portable_nodes else shutil.which("node")
         if not node:
             raise RuntimeError("Node.js 22 ou superior não foi encontrado no PATH.")
+        os.environ["PATH"] = str(Path(node).parent) + os.pathsep + os.environ.get("PATH", "")
         logs = root / "logs"
         logs.mkdir(parents=True, exist_ok=True)
         stamp = time.strftime("%Y%m%d-%H%M%S") + "-" + uuid.uuid4().hex[:8]
@@ -233,7 +241,8 @@ def main(argv=None) -> int:
         output = run([str(installer), "-install", "-branch", "stable"], vencord, env)
         if re.search(r"\b(?:ERROR|FATAL|Failed)\b", output, re.I) or not re.search(r"\bSuccessfully patched\b", output, re.I):
             raise RuntimeError("O instalador oficial não confirmou a instalação. Consulte o log.")
-        run([node, str(SOURCE / "auto-update.cjs"), "--install", str(vencord), str(SOURCE)], vencord)
+        update_mode = "--install" if args.auto_update else "--install-local"
+        run([node, str(SOURCE / "auto-update.cjs"), update_mode, str(vencord), str(SOURCE)], vencord)
         log("INSTALAÇÃO LOCAL CONCLUÍDA. Abra o Discord e ative LefferzinBypass em Plugins.")
         return 0
     except (Exception, KeyboardInterrupt) as error:

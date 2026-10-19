@@ -72,5 +72,27 @@ function fixture() {
 
     f = fixture(); f.windows.inspectWireSockAsync = async () => { throw new Error("query failed"); };
     f.c.scheduleRecovery(0); await f.fire(); assert.equal([...f.timers][0].delay, 10000);
-    console.log("PASS: watchdog recovery, retry backoff/cap, cancellation, disabled plugin, external ownership, other instance, query failure");
+
+    for (const error of [
+        "UAC_CANCELLED: O Windows cancelou a solicitação de administrador (1223).",
+        "UAC_CANCELLED: O Windows cancelou a solicitação de administrador para instalar o WireSock (1223).",
+        "ELEVATION_DENIED: O Windows negou a solicitação de administrador (5).",
+        "ELEVATION_TIMEOUT: Tempo de autorização/execução excedido.",
+    ]) {
+        f = fixture();
+        let starts = 0;
+        f.c.initialize = async () => {};
+        f.c.startInternal = async () => { starts++; return { success: false, state: "inactive", error }; };
+        assert.equal((await f.c.enable(false)).error, error);
+        assert.equal(starts, 1, "manual enable must not repeat an elevation failure");
+        assert.equal(f.timers.size, 0);
+        f.c.scheduleRecovery(0); await f.fire();
+        assert.equal(starts, 2);
+        assert.equal(f.timers.size, 0, "automatic recovery must wait for manual retry after elevation fails");
+    }
+    f = fixture();
+    f.c.startInternal = async () => ({ success: false, state: "inactive", error: "POWERSHELL_FAILED: path cancel-1223 is missing" });
+    f.c.scheduleRecovery(0); await f.fire();
+    assert.equal([...f.timers][0].delay, 10000, "numbers and path names must not be mistaken for refused consent");
+    console.log("PASS: watchdog recovery, retry backoff/cap, cancellation, disabled plugin, external ownership, other instance, query failure, no repeated elevation requests, no consent inferred from path names");
 })();

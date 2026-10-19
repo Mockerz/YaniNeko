@@ -77,7 +77,7 @@ function normalizeUsername(value: string): string {
 }
 
 function needsAdminConsent(message: string | undefined): boolean {
-    return /1223|cancel(?:ed|ado|ada)?|negad[oa]|denied|access is denied|acesso negado|autoriza.{0,24}administrador/i.test(message || "");
+    return /\b(?:UAC_CANCELLED|ELEVATION_DENIED|ELEVATION_TIMEOUT):|access is denied|acesso negado|autoriza.{0,24}administrador/i.test(message || "");
 }
 
 export class PluginVpnController {

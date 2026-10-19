@@ -56,7 +56,7 @@ const sha = "a".repeat(40);
         assert.equal(updater.pluginFile("tests/file.ts"), false);
         assert.equal(updater.pluginFile("server/server.cjs"), false);
         assert.equal(updater.pluginFile("vpn-controller.ts"), true);
-        // A new Discord launch checks even when the previous launch checked recently.
+        // The configured cooldown persists across Discord launches; force-check bypasses it.
         const activePath = path.join(root, ".yanineko-updates/active.json");
         write(activePath, { active: baseline, commit: sha, pid: process.pid });
         const originalFetch = global.fetch;
@@ -69,19 +69,31 @@ const sha = "a".repeat(40);
             await updater.check(root);
             assert.equal(requests, 1);
             await updater.check(root);
-            assert.equal(requests, 1, "same session must respect three-hour cooldown");
+            assert.equal(requests, 1, "three-hour cooldown must be respected");
             const nextBootTime = new Date(Date.now() + 2000);
             fs.utimesSync(activePath, nextBootTime, nextBootTime);
             await updater.check(root);
-            assert.equal(requests, 2, "new launch must bypass previous session cooldown");
+            assert.equal(requests, 1, "relaunch must preserve the previous check time");
             const checkedPath = path.join(root, ".yanineko-updates/checked.json");
             const checked = JSON.parse(fs.readFileSync(checkedPath));
             write(checkedPath, { ...checked, at: Date.now() - 60 * 60 * 1000 });
             await updater.check(root);
-            assert.equal(requests, 2, "one hour must not trigger another check");
+            assert.equal(requests, 1, "one hour must not trigger another check");
             write(checkedPath, { ...checked, at: Date.now() - 3 * 60 * 60 * 1000 });
             await updater.check(root);
-            assert.equal(requests, 3, "open Discord checks again after three hours");
+            assert.equal(requests, 2, "default cadence checks again after three hours");
+            const configPath = path.join(root, ".yanineko-updates/config.json");
+            const config = JSON.parse(fs.readFileSync(configPath));
+            write(configPath, { ...config, updateIntervalMs: 24 * 60 * 60 * 1000 });
+            write(checkedPath, { at: Date.now() - 3 * 60 * 60 * 1000 });
+            await updater.check(root);
+            assert.equal(requests, 2, "daily cadence suppresses checks after three hours");
+            write(checkedPath, { at: Date.now() - 24 * 60 * 60 * 1000 });
+            await updater.check(root);
+            assert.equal(requests, 3, "daily cadence permits a check after one day");
+            write(checkedPath, { at: Date.now() });
+            await updater.check(root, { force: true });
+            assert.equal(requests, 4, "forced update bypasses the selected cadence");
             const pendingPath = path.join(root, ".yanineko-updates/pending.json");
             const quarantineDir = path.join(root, ".yanineko-updates/quarantine");
             const invalidMarkers = ["{broken", "null", { id: "../escape" }, { id: "c".repeat(40) }, { id: badSha }, { id: baseline }];
@@ -93,7 +105,7 @@ const sha = "a".repeat(40);
                 assert.equal(fs.readdirSync(quarantineDir).length, before + 1);
                 assert.equal(state().active, baseline);
             }
-            assert.equal(requests, 3 + invalidMarkers.length, "recovery bypasses the cooldown");
+            assert.equal(requests, 4 + invalidMarkers.length, "recovery bypasses the cooldown");
 
             // A corrupt release is preserved for diagnosis and replaced by a validated build.
             const replacement = path.join(root, "replacement");
@@ -105,7 +117,7 @@ const sha = "a".repeat(40);
             write(pendingPath, { id: badSha });
             await updater.check(root);
             assert.ok(fs.existsSync(pendingPath), "valid pending remains ready for next launch");
-            assert.equal(requests, 3 + invalidMarkers.length, "valid pending must not trigger another download");
+            assert.equal(requests, 4 + invalidMarkers.length, "valid pending must not trigger another download");
             assert.equal(updater.choose(root), badSha);
 
             // Never displace a release that may still be loaded or needed for rollback.
@@ -120,7 +132,31 @@ const sha = "a".repeat(40);
                 fs.writeFileSync(protectedFile, original);
             }
         } finally { global.fetch = originalFetch; }
+
+        // Local builds stay selected even if an old worker publishes an update later.
+        const localRoot = path.join(root, "local-install");
+        fs.cpSync(updater.release(root, baseline), path.join(localRoot, "dist"), { recursive: true });
+        updater.install(localRoot, __dirname, process.execPath, true);
+        const localHome = path.join(localRoot, ".yanineko-updates");
+        const localState = JSON.parse(fs.readFileSync(path.join(localHome, "active.json")));
+        const config = () => JSON.parse(fs.readFileSync(path.join(localHome, "config.json")));
+        assert.equal(config().localOnly, true);
+        fs.cpSync(updater.release(localRoot, localState.active), updater.release(localRoot, sha), { recursive: true });
+        write(path.join(localHome, "pending.json"), { id: sha });
+        assert.equal(updater.choose(localRoot), localState.active);
+        const savedFetch = global.fetch;
+        let localRequests = 0;
+        global.fetch = async () => { localRequests++; throw new Error("Local build must not fetch"); };
+        try { await updater.check(localRoot); } finally { global.fetch = savedFetch; }
+        assert.equal(localRequests, 0);
+        // Normal installation clears local mode and stale notifications/pending state.
+        write(path.join(localHome, "notifications.json"), [{ phase: "ready" }]);
+        updater.install(localRoot, __dirname);
+        assert.equal(config().localOnly, false);
+        assert.equal(fs.existsSync(path.join(localHome, "pending.json")), false);
+        assert.equal(fs.existsSync(path.join(localHome, "notifications.json")), false);
         console.log("PASS: installation, deferred activation, preserved baseline, corrupt build rejection, rollback, path validation, pinned source hashes, pending recovery, release quarantine, protected releases");
+        console.log("PASS: local builds pause network updates and pending activation; normal installation restores automatic updates");
     } finally {
         const resolved = fs.realpathSync(root);
         assert.ok(resolved.startsWith(fs.realpathSync(__dirname) + path.sep));
