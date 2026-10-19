@@ -10,6 +10,12 @@ Plugin para Discord com Vencord que utiliza a Proton VPN para criar uma rota alt
 4. Abra o Discord e acesse **Configurações → Vencord → Plugins**.
 5. Procure por **LefferzinBypass** e ative o plugin.
 
+## Tutorial em vídeo
+
+Prefere acompanhar a instalação passo a passo?
+
+**[▶ Assistir ao tutorial no YouTube](https://www.youtube.com/watch?v=W8dJV1NVDHQ)**
+
 ## Como usar
 
 1. Abra as configurações do **LefferzinBypass**.
@@ -59,4 +65,12 @@ Os logs de instalação ficam em:
 
 `%LOCALAPPDATA%\LefferzinBypass\logs`
 
-Caso encontre algum problema, envie o log correspondente ao suporte do projeto.
+## Suporte
+
+Está com problemas, encontrou algum erro ou precisa de ajuda?
+
+Entre no nosso servidor do Discord para receber suporte.
+
+**[Entrar no servidor de suporte do Discord](https://discord.gg/WX8AnmAp44)**
+
+Caso encontre algum erro, envie os logs correspondentes para facilitar a identificação do problema.
