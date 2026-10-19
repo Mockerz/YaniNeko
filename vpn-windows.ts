@@ -508,7 +508,7 @@ async function ensureWireSockInstalledOnce(log: WireSockLogger): Promise<string>
         return installed.executable;
     } catch (error) {
         const code = Number((error as { code?: unknown })?.code);
-        if (code === 1223) throw new Error("A instalação do WireSock foi cancelada pelo usuário.");
+        if (code === 1223) throw new Error("UAC_CANCELLED: O Windows cancelou a solicitação de administrador para instalar o WireSock (1223).");
         throw new Error(`Não foi possível preparar o WireSock: ${logError(error)}`);
     } finally {
         await fs.promises.rm(temporary, { recursive: true, force: true }).catch(() => {});
@@ -540,11 +540,16 @@ try {
   if($change.ReturnValue -ne 0){ throw "Falha ao atualizar o perfil do serviço: $($change.ReturnValue)" }
   $actual=Get-CimInstance Win32_Service -Filter "Name='$name'"
   if($actual.PathName -cne $expected){ throw 'O serviço WireSock permaneceu com outra configuração' }
-  $sc=Join-Path $env:SystemRoot 'System32\\sc.exe'
-  & $sc failure $name reset= 86400 actions= restart/5000/restart/15000/restart/60000 | Out-Null
-  if($LASTEXITCODE -ne 0){ throw "Falha ao configurar a recuperação automática do serviço WireSock: $LASTEXITCODE" }
   Start-Service -Name $name
   (Get-Service -Name $name).WaitForStatus('Running',[TimeSpan]::FromSeconds(20))
+  try {
+    $sc=Join-Path $env:SystemRoot 'System32\\sc.exe'
+    & $sc failure $name reset= 86400 actions= restart/5000/restart/15000/restart/60000 | Out-Null
+    if($LASTEXITCODE -ne 0){ throw "Falha ao configurar a recuperação automática do serviço WireSock: $LASTEXITCODE" }
+    [System.IO.File]::WriteAllText(${quotePowerShell(recoveryMarkerPath(configPath))},${quotePowerShell(WIRESOCK_RECOVERY_MARKER)},[System.Text.Encoding]::ASCII)
+  } catch {
+    try { if($env:YANI_ELEVATED_WARNING_FILE){ [System.IO.File]::WriteAllText($env:YANI_ELEVATED_WARNING_FILE,$_.Exception.ToString(),[System.Text.Encoding]::UTF8) } } catch {}
+  }
 } catch {
   $detail=$_.Exception.ToString()
   if($env:YANI_ELEVATED_ERROR_FILE){ try { [System.IO.File]::WriteAllText($env:YANI_ELEVATED_ERROR_FILE,$detail,[System.Text.Encoding]::UTF8) } catch {} }
@@ -555,19 +560,35 @@ try {
 
 function elevatedPowerShellArgs(scriptPath: string, diagnosticPath: string): string[] {
     const wrapper = `$ErrorActionPreference='Stop'
-$env:YANI_ELEVATED_ERROR_FILE=${quotePowerShell(diagnosticPath)}
 $scriptPath=${quotePowerShell(scriptPath)}
+$powershell=Join-Path $PSHOME 'powershell.exe'
 $identity=[Security.Principal.WindowsIdentity]::GetCurrent()
 $principal=New-Object Security.Principal.WindowsPrincipal($identity)
-if($principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)){ & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $scriptPath; exit $LASTEXITCODE }
+$stage='elevation'
 try {
+  if($principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)){
+    $stage='execution'
+    & $powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $scriptPath
+    exit $LASTEXITCODE
+  }
   $arguments='-NoProfile -NonInteractive -ExecutionPolicy Bypass -File "' + $scriptPath + '"'
-  $child=Start-Process powershell.exe -Verb RunAs -WindowStyle Hidden -Wait -PassThru -ErrorAction Stop -ArgumentList $arguments
+  $child=Start-Process $powershell -Verb RunAs -WindowStyle Hidden -Wait -PassThru -ErrorAction Stop -ArgumentList $arguments
+  $stage='execution'
+  if($null -eq $child -or $null -eq $child.ExitCode){ throw 'O Windows não retornou o código de saída do processo elevado.' }
   exit $child.ExitCode
 } catch {
-  $detail=$_.Exception.ToString()
-  if($env:YANI_ELEVATED_ERROR_FILE){ try { [System.IO.File]::WriteAllText($env:YANI_ELEVATED_ERROR_FILE,$detail,[System.Text.Encoding]::UTF8) } catch {} }
-  if($_.Exception.HResult -eq -2147023673 -or $detail -match '1223|cancel|cancelled|canceled') { exit 1223 }
+  $nativeCode=0
+  $exception=$_.Exception
+  while($null -ne $exception){
+    if($exception -is [System.ComponentModel.Win32Exception]){ $nativeCode=$exception.NativeErrorCode; break }
+    if($exception.HResult -eq -2147023673){ $nativeCode=1223; break }
+    if($exception.HResult -eq -2147024891){ $nativeCode=5; break }
+    $exception=$exception.InnerException
+  }
+  $detail="stage=$stage nativeCode=$nativeCode hresult=$($_.Exception.HResult) " + $_.Exception.ToString()
+  try { [System.IO.File]::WriteAllText(${quotePowerShell(diagnosticPath)},$detail,[System.Text.Encoding]::UTF8) } catch {}
+  if($stage -eq 'elevation' -and $nativeCode -eq 1223){ exit 1223 }
+  if($stage -eq 'elevation' -and $nativeCode -eq 5){ exit 5 }
   [Console]::Error.WriteLine($detail)
   exit 1
 }`;
@@ -598,12 +619,15 @@ function writeRecoveryAttemptMarker(configPath: string, log: WireSockLogger): vo
     }
 }
 
-function runElevatedPowerShell(script: string, timeoutMs: number): Promise<void> {
+function runElevatedPowerShell(script: string, timeoutMs: number): Promise<string> {
     const diagnosticDir = fs.mkdtempSync(path.join(os.tmpdir(), "yanineko-wiresock-elevation-"));
     const diagnosticPath = path.join(diagnosticDir, "error.txt");
     const scriptPath = path.join(diagnosticDir, "elevated.ps1");
+    const warningPath = path.join(diagnosticDir, "warning.txt");
+    const completedPath = path.join(diagnosticDir, "completed.txt");
     try {
-        const scriptBytes = Buffer.from(script, "utf16le");
+        // Set these in the elevated script itself: RunAs may use another environment/account.
+        const scriptBytes = Buffer.from(`$env:YANI_ELEVATED_ERROR_FILE=${quotePowerShell(diagnosticPath)}\n$env:YANI_ELEVATED_WARNING_FILE=${quotePowerShell(warningPath)}\n${script}\n[System.IO.File]::WriteAllText(${quotePowerShell(completedPath)},'ok')\nexit 0`, "utf16le");
         fs.writeFileSync(scriptPath, Buffer.concat([Buffer.from([0xff, 0xfe]), scriptBytes]));
     } catch (error) {
         try { fs.rmSync(diagnosticDir, { recursive: true, force: true }); } catch {}
@@ -614,23 +638,28 @@ function runElevatedPowerShell(script: string, timeoutMs: number): Promise<void>
             windowsHide: true, timeout: timeoutMs, encoding: "utf8",
         }, (error, _stdout, stderr) => {
             try {
-                if (!error) { resolve(); return; }
+                if (!error && fs.existsSync(completedPath)) {
+                    let warning = "";
+                    try { warning = fs.readFileSync(warningPath, "utf8").replace(/^\uFEFF/, "").trim(); } catch {}
+                    resolve(warning); return;
+                }
                 let childDetail = "";
                 try { childDetail = fs.readFileSync(diagnosticPath, "utf8").replace(/^\uFEFF/, "").trim(); } catch {}
                 const detail = childDetail || String(stderr || "").trim();
-                const code = (error as NodeJS.ErrnoException).code;
+                const code = (error as NodeJS.ErrnoException | null)?.code;
                 const codeText = code === undefined ? "" : String(code);
-                if (codeText === "1223") {
-                    reject(new Error("UAC_CANCELLED: A autorização de administrador foi cancelada."));
+                const failure = error as (NodeJS.ErrnoException & { killed?: boolean; signal?: string | null }) | null;
+                const fail = (kind: string, message: string) => reject(Object.assign(new Error(`${kind}: ${message}${detail ? ` | ${detail}` : ""}`), { code: kind }));
+                if (failure?.killed) {
+                    fail("ELEVATION_TIMEOUT", `Tempo de autorização/execução excedido (${failure.signal || "timeout"}).`);
                     return;
                 }
-                const failure = error as NodeJS.ErrnoException & { killed?: boolean; signal?: string | null };
-                const fallback = failure.killed
-                    ? `PowerShell foi encerrado (${failure.signal || "timeout"}).`
-                    : code !== undefined
-                        ? `PowerShell encerrou com código ${codeText}.`
-                        : `Não foi possível iniciar PowerShell (${failure.code || failure.name}).`;
-                reject(new Error(detail || fallback));
+                if (codeText === "1223") {
+                    fail("UAC_CANCELLED", "O Windows cancelou a solicitação de administrador (1223). Tente novamente pelo botão Start Bypass e autorize a janela do Windows.");
+                    return;
+                }
+                if (codeText === "5") { fail("ELEVATION_DENIED", "O Windows negou a solicitação de administrador (5)."); return; }
+                fail("POWERSHELL_FAILED", code !== undefined ? `PowerShell encerrou com código ${codeText}.` : "PowerShell não confirmou a conclusão do script.");
             } finally {
                 try { fs.rmSync(diagnosticDir, { recursive: true, force: true }); } catch {}
             }
@@ -699,14 +728,16 @@ export async function startWireSockService(
     fs.renameSync(staging, target);
 
     try {
-        await runElevatedPowerShell(serviceScript(executable, target), 120_000);
-        writeRecoveryMarker(target, log);
+        const warning = await runElevatedPowerShell(serviceScript(executable, target), 120_000);
+        if (warning) {
+            writeRecoveryAttemptMarker(target, log);
+            log("warn", "VPN iniciada; recuperação automática do serviço não configurada", { erro: safeDiagnosticDetail(warning, 800) });
+        }
     } catch (error) {
         try { fs.rmSync(staging, { force: true }); } catch {}
         const detail = logError(error);
         log("error", "falha ao iniciar o serviço WireSock", { erro: detail });
-        if (/1223|cancel|cancelado|canceled|negado|denied|acesso negado/i.test(detail))
-            throw new Error("A autorização de administrador para configurar o WireSock foi negada ou cancelada.");
+        if (["UAC_CANCELLED", "ELEVATION_DENIED", "ELEVATION_TIMEOUT"].includes(String((error as { code?: unknown })?.code))) throw error;
         throw new Error(`Não foi possível configurar/iniciar o serviço WireSock: ${detail}`);
     }
 

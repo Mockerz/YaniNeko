@@ -6,7 +6,9 @@ const crypto = require("node:crypto");
 const { spawn, spawnSync } = require("node:child_process");
 const REPO = "Mockerz/YaniNeko";
 const BRANCH = "main";
-const INTERVAL = 3 * 60 * 60 * 1000;
+const DEFAULT_INTERVAL = 3 * 60 * 60 * 1000;
+const MIN_INTERVAL = 60 * 60 * 1000;
+const MAX_INTERVAL = 24 * 60 * 60 * 1000;
 const REQUIRED = ["manifest.json", "index.tsx", "native.ts", "presence.ts", "stability.ts", "error-reporter.ts", "device-client.ts", "vpn-controller.ts", "vpn-proton.ts", "vpn-types.ts", "vpn-windows.ts", "bin/win32-x64/proton-confgen.exe"];
 const ARTIFACTS = ["patcher.js", "preload.js", "renderer.js", "bin/win32-x64/proton-confgen.exe"];
 const validId = id => typeof id === "string" && /^(?:[a-f0-9]{40}|local-[a-f0-9]{32})$/.test(id);
@@ -122,7 +124,7 @@ function stageRelease(root, id, dist) {
     fs.mkdirSync(path.dirname(target), { recursive: true });
     fs.renameSync(dist, target);
 }
-function install(root, source, node = process.execPath) {
+function install(root, source, node = process.execPath, localOnly = false) {
     root = fs.realpathSync(root);
     const revision = read(path.join(source, ".source-commit.json"))?.sha;
     const id = `local-${crypto.randomUUID().replaceAll("-", "")}`;
@@ -133,12 +135,13 @@ function install(root, source, node = process.execPath) {
     fs.copyFileSync(path.join(source, "auto-update.cjs"), path.join(target, "auto-update.cjs"));
     seal(target); validateRelease(target);
     fs.copyFileSync(path.join(source, "auto-update.cjs"), path.join(root, "yanineko-updater.cjs"));
-    write(path.join(home(root), "config.json"), { node });
+    write(path.join(home(root), "config.json"), { node, localOnly });
     write(path.join(home(root), "active.json"), { active: id, commit: validId(revision) ? revision : null });
     fs.rmSync(path.join(home(root), "pending.json"), { force: true });
+    fs.rmSync(path.join(home(root), "notifications.json"), { force: true });
     // Stable entry point kept at the path already referenced by the official injector.
     fs.writeFileSync(path.join(root, "dist/patcher.js"), '"use strict";\nrequire("../yanineko-updater.cjs").boot(require("node:path").resolve(__dirname, ".."));\n');
-    log(root, `Installed updater; baseline ${id}`);
+    log(root, `Installed updater; baseline ${id}${localOnly ? "; automatic updates paused for local testing" : ""}`);
 }
 function choose(root) {
     const statePath = path.join(home(root), "active.json");
@@ -147,7 +150,8 @@ function choose(root) {
     // Another Discord process can still be using the active version.
     if (alive(state.pid) && state.pid !== process.pid) return state.active;
     const pendingPath = path.join(home(root), "pending.json");
-    const { pending } = inspectPending(root, state);
+    const { pending } = read(path.join(home(root), "config.json"))?.localOnly === true
+        ? { pending: null } : inspectPending(root, state);
     if (pending) {
         try {
             validateRelease(release(root, pending.id));
@@ -182,6 +186,7 @@ function boot(root) {
         }
         throw error;
     }
+    if (read(path.join(home(root), "config.json"))?.localOnly === true) return;
     const check = () => {
         try {
             const node = read(path.join(home(root), "config.json"))?.node;
@@ -194,7 +199,12 @@ function boot(root) {
     };
     const timer = setTimeout(() => {
         check();
-        const periodic = setInterval(check, INTERVAL); periodic.unref();
+        const schedule = () => {
+            // Recheck the small cooldown file every default interval; check() reads the
+            // user's chosen cadence, so changing the setting takes effect without restart.
+            const periodic = setTimeout(() => { check(); schedule(); }, DEFAULT_INTERVAL); periodic.unref();
+        };
+        schedule();
     }, 30_000);
     timer.unref();
 }
@@ -247,7 +257,8 @@ function compile(root, work) {
     });
     if (result.status !== 0) throw new Error(`Build failed: ${(result.stderr || result.error?.message || result.stdout || "unknown").slice(-4000)}`);
 }
-async function check(root) {
+async function check(root, { force = false } = {}) {
+    if (read(path.join(home(root), "config.json"))?.localOnly === true) return;
     const base = home(root); fs.mkdirSync(base, { recursive: true });
     const lock = path.join(base, "worker.lock");
     let fd;
@@ -265,12 +276,12 @@ async function check(root) {
         if (!validId(state?.active)) return;
         const { pending, recovered } = inspectPending(root, state);
         if (pending) return;
-        // active.json is rewritten by the bootstrap on each Discord launch.
-        // Scope the cooldown to that launch, including older installed bootstraps.
-        const session = `${state.pid}:${fs.statSync(path.join(base, "active.json")).mtimeMs}`;
+        // Keep the cadence across Discord restarts; an admin force-check bypasses it.
         const checked = read(path.join(base, "checked.json"));
-        if (!recovered && checked?.session === session && Date.now() - checked.at < INTERVAL - 5_000) return;
-        write(path.join(base, "checked.json"), { at: Date.now(), session });
+        const configured = read(path.join(base, "config.json"))?.updateIntervalMs;
+        const interval = Number.isFinite(configured) ? Math.min(MAX_INTERVAL, Math.max(MIN_INTERVAL, configured)) : DEFAULT_INTERVAL;
+        if (!force && !recovered && Number.isFinite(checked?.at) && Date.now() - checked.at < interval - 5_000) return;
+        write(path.join(base, "checked.json"), { at: Date.now(), forced: force });
         notify(root, "checking");
         const commit = JSON.parse(await download(`https://api.github.com/repos/${REPO}/commits/${BRANCH}`));
         const sha = commit.sha;
@@ -294,7 +305,11 @@ async function check(root) {
         write(path.join(base, "pending.json"), { id: sha, preparedAt: Date.now() });
         notify(root, "ready");
         log(root, `Revision ${sha} ready for next Discord launch`);
-    } catch (error) { notify(root, "error"); log(root, `Update failed; current version preserved: ${error.message}`); }
+    } catch (error) {
+        notify(root, "error");
+        fs.rmSync(path.join(base, "checked.json"), { force: true });
+        log(root, `Update failed; current version preserved: ${error.message}`);
+    }
     finally {
         if (work && fs.existsSync(work)) fs.rmSync(inside(base, path.basename(work)), { recursive: true, force: true });
         fs.rmSync(lock, { force: true });
@@ -303,7 +318,8 @@ async function check(root) {
 module.exports = { notify, install, boot, choose, check, fetchSource, prepareBuild, compile, seal, validateRelease, inside, release, pluginFile, stageRelease };
 if (require.main === module) {
     const [mode, root, source] = process.argv.slice(2);
-    if (mode === "--install" && root && source) install(path.resolve(root), path.resolve(source));
+    if (["--install", "--install-local"].includes(mode) && root && source) install(path.resolve(root), path.resolve(source), process.execPath, mode === "--install-local");
     else if (mode === "--check" && root) check(path.resolve(root)).catch(error => { log(root, error.message); process.exitCode = 1; });
-    else { console.error("Usage: auto-update.cjs --install VENCORD SOURCE | --check VENCORD"); process.exitCode = 1; }
+    else if (mode === "--force-check" && root) check(path.resolve(root), { force: true }).catch(error => { log(root, error.message); process.exitCode = 1; });
+    else { console.error("Usage: auto-update.cjs --install VENCORD SOURCE | --install-local VENCORD SOURCE | --check VENCORD | --force-check VENCORD"); process.exitCode = 1; }
 }

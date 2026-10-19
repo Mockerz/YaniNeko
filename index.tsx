@@ -308,6 +308,15 @@ function AboutPlugin() {
 }
 
 const settings = definePluginSettings({
+    updateFrequency: {
+        type: OptionType.SELECT,
+        description: "Frequencia de verificacao automatica de atualizacoes do plugin.",
+        options: [
+            { label: "A cada 3 horas (padrao)", value: "3h" },
+            { label: "Uma vez por dia", value: "daily" }
+        ],
+        default: "3h"
+    },
     aboutSettings: {
         type: OptionType.COMPONENT,
         description: "Passo a passo rapido: 1) Entrar na conta Proton  ->  2) Otimizar rota  ->  3) Start Bypass",

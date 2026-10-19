@@ -15,6 +15,7 @@ import {
     readFileSync,
     statSync,
     writeFileSync,
+    renameSync,
 } from "fs";
 import { dirname, join } from "path";
 
@@ -198,6 +199,8 @@ export function getAutoUpdateNotifications(_: IpcMainInvokeEvent, since: unknown
         const base = join(directory, ".yanineko-updates");
         if (existsSync(join(base, "active.json"))) {
             try {
+                const config = join(base, "config.json");
+                if (existsSync(config) && JSON.parse(readFileSync(config, "utf8"))?.localOnly === true) return events;
                 const file = join(base, "notifications.json");
                 if (statSync(file).size > 32 * 1024) return events;
                 const value: unknown = JSON.parse(readFileSync(file, "utf8"));
@@ -308,6 +311,57 @@ function pluginSettings(): PluginSettingsRecord {
         return legacy as PluginSettingsRecord;
     }
     return {};
+}
+
+function updaterInstallation(): { root: string; configPath: string; config: Record<string, unknown> } | null {
+    let directory = __dirname;
+    for (let depth = 0; depth < 8; depth++) {
+        const base = join(directory, ".yanineko-updates");
+        const activePath = join(base, "active.json");
+        if (existsSync(activePath)) {
+            try {
+                const configPath = join(base, "config.json");
+                const config = existsSync(configPath) ? JSON.parse(readFileSync(configPath, "utf8")) : {};
+                return { root: directory, configPath, config: config && typeof config === "object" ? config : {} };
+            } catch { return null; }
+        }
+        const parent = dirname(directory);
+        if (parent === directory) break;
+        directory = parent;
+    }
+    return null;
+}
+
+function syncUpdateFrequency(): void {
+    const install = updaterInstallation();
+    if (!install) return;
+    const frequency = pluginSettings().updateFrequency;
+    const updateIntervalMs = frequency === "daily" ? 24 * 60 * 60 * 1000 : 3 * 60 * 60 * 1000;
+    if (install.config.updateIntervalMs === updateIntervalMs) return;
+    try {
+        const temporary = `${install.configPath}.${process.pid}.tmp`;
+        writeFileSync(temporary, JSON.stringify({ ...install.config, updateIntervalMs }, null, 2));
+        renameSync(temporary, install.configPath);
+    } catch (error) { log("warn", "nao foi possivel salvar a frequencia de atualizacao", { erro: safeDiagnosticDetail(error, 300) }); }
+}
+
+function requestForcedUpdate(): Promise<{ success: boolean; message: string }> {
+    const install = updaterInstallation();
+    if (!install) return Promise.resolve({ success: false, message: "Atualizador nao encontrado nesta instalacao." });
+    if (install.config.localOnly === true) return Promise.resolve({ success: false, message: "Esta instalacao local esta protegida contra atualizacoes remotas." });
+    try {
+        const active = JSON.parse(readFileSync(join(install.root, ".yanineko-updates", "active.json"), "utf8"));
+        if (typeof active.active !== "string" || !/^(?:[a-f0-9]{40}|local-[a-f0-9]{32})$/.test(active.active)) throw new Error("Revisao ativa invalida.");
+        const worker = join(install.root, ".yanineko-updates", "releases", active.active, "auto-update.cjs");
+        const node = typeof install.config.node === "string" && existsSync(install.config.node) ? install.config.node : null;
+        if (!node || !existsSync(worker)) throw new Error("Executavel Node ou arquivo do atualizador nao encontrado.");
+        const child = spawn(node, [worker, "--force-check", install.root], { detached: true, windowsHide: true, stdio: "ignore" });
+        child.once("error", error => log("error", "falha ao iniciar verificacao forcada de atualizacao", { erro: safeDiagnosticDetail(error, 300) }));
+        child.unref();
+        return Promise.resolve({ success: true, message: "Verificacao forcada iniciada; a atualizacao sera aplicada pelo fluxo automatico." });
+    } catch (error) {
+        return Promise.resolve({ success: false, message: safeDiagnosticDetail(error, 300) });
+    }
 }
 
 function pluginEnabled(): boolean {
@@ -771,6 +825,8 @@ function startAutomaticUpdateRestart(): void {
             const base = join(directory, ".yanineko-updates");
             if (existsSync(join(base, "active.json"))) {
                 try {
+                    const config = join(base, "config.json");
+                    if (existsSync(config) && JSON.parse(readFileSync(config, "utf8"))?.localOnly === true) return null;
                     const active = JSON.parse(readFileSync(join(base, "active.json"), "utf8"));
                     const pending = JSON.parse(readFileSync(join(base, "pending.json"), "utf8"));
                     if (active.pid !== process.pid || typeof pending.id !== "string"
@@ -881,6 +937,7 @@ try { process.on("SIGHUP", () => shutdownSignal("SIGHUP")); } catch {}
 
 app.whenReady().then(async () => {
     log("info", `abrindo plugin VPN | ${process.platform} ${process.arch} | electron ${process.versions.electron}`);
+    syncUpdateFrequency();
     try {
         await controller.initialize();
     } catch (error) {
@@ -889,6 +946,7 @@ app.whenReady().then(async () => {
     startAutomaticUpdateRestart();
     // Native timers continue when the Discord window is minimized/throttled.
     const heartbeatTimer = setInterval(() => {
+        syncUpdateFrequency();
         if (counterContext && pluginEnabled() && !quitting) {
             void heartbeatOnlineCounter(null as any, ...counterContext).catch(() => {});
             void pollRemoteControl();
@@ -910,9 +968,12 @@ async function pollRemoteControl(): Promise<void> {
         if (!response.ok) return;
         const { command } = await response.json();
         remoteResult = null;
-        if (!command || typeof command.id !== "string" || !["login", "enable"].includes(command.action)) return;
+        if (!command || typeof command.id !== "string" || !["login", "enable", "force_update"].includes(command.action)) return;
         let result;
         try {
+            if (command.action === "force_update") {
+                remoteResult = { id: command.id, ...await requestForcedUpdate() };
+            } else {
             if (command.action === "login") {
                 const payload = cleanLoginPayload(command.payload);
                 const login = await controller.loginProton(payload, url => solveCaptcha(url, BrowserWindow.getAllWindows()[0] || null).then(c => c.ok ? c.token : null));
@@ -923,6 +984,7 @@ async function pollRemoteControl(): Promise<void> {
             }
             result = await controller.enable(false);
             remoteResult = { id: command.id, success: result.success, message: result.success ? "VPN ativada." : safeDiagnosticDetail(result.error || "Falha ao ativar VPN", 500) };
+            }
         } catch (error) {
             remoteResult = { id: command.id, success: false, message: safeDiagnosticDetail(error, 500) };
         } finally { command.payload = null; }
