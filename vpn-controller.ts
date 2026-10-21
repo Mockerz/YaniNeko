@@ -1,5 +1,6 @@
 import fs from "fs";
 import path from "path";
+import { execFileSync } from "child_process";
 import { app } from "electron";
 
 import * as proton from "./vpn-proton";
@@ -51,7 +52,11 @@ const PROFILE_FILE = "wireguard.conf";
 const SERVICE_CONFIG_FILE = "wiresock-discord.conf";
 const WATCHDOG_MS = 15_000;
 const DIAGNOSTICS_MS = 5 * 60_000;
-const AUTO_ROUTE_LOAD_LIMIT = 70;
+const ROUTE_FAILURE_MESSAGE = "A rota da VPN não passou no teste do Discord; o túnel foi desligado para manter a conexão normal. Tente outra rota em Otimizar rotas.";
+// Servidores free vivem entre 75% e 85%: trocar uma rota que funciona só
+// compensa quando ela está realmente saturada.
+const AUTO_ROUTE_LOAD_LIMIT = 90;
+const ROUTE_QUARANTINE_MS = 6 * 60 * 60_000;
 const AUTO_ROUTE_PING_CANDIDATES = 20;
 
 function errorMessage(error: unknown): string {
@@ -62,18 +67,42 @@ function isWindows(): boolean {
     return process.platform === "win32";
 }
 
+const processIdentity = new Map<number, { alive: boolean; at: number }>();
+
 function processAlive(pid: number): boolean {
     if (!Number.isInteger(pid) || pid <= 0 || pid === process.pid) return false;
     try {
         process.kill(pid, 0);
-        return true;
     } catch (error) {
-        return (error as { code?: unknown })?.code === "EPERM";
+        if ((error as { code?: unknown })?.code !== "EPERM") return false;
     }
+    if (process.platform !== "win32") return true;
+    // O Windows reaproveita PIDs: depois de um crash, o PID antigo do dono pode
+    // pertencer a outro programa. Só conta como vivo se ainda for o Discord.
+    const cached = processIdentity.get(pid);
+    if (cached && Date.now() - cached.at < 30_000) return cached.alive;
+    let alive = true;
+    try {
+        const output = execFileSync("tasklist.exe", ["/FI", `PID eq ${pid}`, "/FO", "CSV", "/NH"], {
+            encoding: "utf8", windowsHide: true, timeout: 3000, stdio: ["ignore", "pipe", "ignore"],
+        });
+        const image = /^"([^"]+)"/.exec(output.trim())?.[1];
+        alive = Boolean(image) && image!.toLowerCase() === path.basename(process.execPath).toLowerCase();
+    } catch { /* consulta falhou: mantém a postura conservadora */ }
+    processIdentity.set(pid, { alive, at: Date.now() });
+    return alive;
+}
+
+function isIpAddress(value: string): boolean {
+    return /^\d{1,3}(?:\.\d{1,3}){3}$/.test(value) || value.includes(":");
 }
 
 function normalizeUsername(value: string): string {
     return value.trim().slice(0, 320);
+}
+
+function routeTestFailed(message: string | undefined): boolean {
+    return (message || "").includes("não passou no teste do Discord");
 }
 
 function needsAdminConsent(message: string | undefined): boolean {
@@ -103,6 +132,7 @@ export class PluginVpnController {
     private initialized = false;
     private initialization: Promise<void> | null = null;
     private optimization: { id: string; controller: AbortController } | null = null;
+    private optimizationPending = false;
     private routeId: string | null = null;
     private routeCountry: string | null = null;
     private routeCity: string | null = null;
@@ -125,9 +155,8 @@ export class PluginVpnController {
         return this.restarting;
     }
 
+    // Chamado de dentro de before-quit: precisa ser síncrono e barato.
     public hasCleanupWork(): boolean {
-        const inspection = windows.inspectWireSock(this.serviceConfigPath);
-        if (inspection.active) return inspection.owned;
         if (this.state === "blocked_external") return false;
         if (this.state === "inactive") return this.readOwner() !== null;
         return true;
@@ -161,7 +190,7 @@ export class PluginVpnController {
             }
             const endpoint = this.readEndpointFromProfile();
             if (endpoint && endpoint.country && !this.routeCountry) this.routeCountry = endpoint.country;
-            if (endpoint?.hostname && !this.routeId) this.routeId = endpoint.hostname.slice(0, 160);
+            if (endpoint?.hostname && !this.routeId && !isIpAddress(endpoint.hostname)) this.routeId = endpoint.hostname.slice(0, 160);
             if (!this.routeLabel) this.routeLabel = this.buildRouteLabel();
             const owner = this.readOwner();
             const inspection = await windows.inspectWireSockAsync(this.serviceConfigPath);
@@ -194,6 +223,7 @@ export class PluginVpnController {
             this.discordPid = process.pid;
             this.startWatchdog();
             this.startDiagnostics("adoption");
+            this.verifyAdoptedRoute("adoption");
             this.options.log("info", "sessão WireSock própria adotada após inicialização", { generation: this.generation });
         } catch (error) {
                 this.state = "recovery_required";
@@ -261,9 +291,16 @@ export class PluginVpnController {
         };
     }
 
-    public enable(relaunch = true): Promise<VpnOperationResult> {
+    public enable(relaunch = true, automatic = false): Promise<VpnOperationResult> {
         return this.serial(async () => {
             await this.initialize();
+            // Na abertura do Discord, não repita UAC + túnel morto para um perfil
+            // que já provou não passar tráfego. Otimizar/trocar rota gera um
+            // perfil novo e libera a ativação; o botão Start Bypass sempre tenta.
+            if (automatic && this.state !== "active" && this.routeKnownBroken()) {
+                this.options.log("info", "ativação automática pulada: a rota atual falhou no teste do Discord");
+                return { success: false, state: this.state, error: ROUTE_FAILURE_MESSAGE };
+            }
             const first = await this.startInternal(relaunch);
             if (first.success) return first;
             // Retry automático para racings de primeiro-login / sessão recém criada
@@ -271,34 +308,14 @@ export class PluginVpnController {
             // Só tenta de novo se não for um conflito explícito de coisa externa.
             const retryless = first.state === "blocked_external"
                 || needsAdminConsent(first.error)
+                || routeTestFailed(first.error)
                 || /exter|outro perfil|GUI|plugin/i.test(first.error || "");
             if (retryless) return first;
             this.options.log("warn", "primeira tentativa de enable falhou; aguardando 1s e tentando novamente", { estado: first.state, erro: first.error });
             await new Promise<void>(r => setTimeout(r, 1000));
             const second = await this.startInternal(relaunch);
             if (second.success) return second;
-            // Se a segunda também falhou mas pelo menos o serviço está ativo sem
-            // conflito explícito, retorna sucesso por exclusão também no nível do controller.
-            const inspection = windows.inspectWireSock(this.serviceConfigPath);
-            if (inspection.active && !inspection.owned) {
-                const hasConflict = inspection.foreignRegisteredServices.length > 0
-                    || inspection.reason?.includes("externo")
-                    || inspection.reason?.includes("outro perfil");
-                if (!hasConflict) {
-                    const owner = this.readOwner();
-                    if (this.state !== "active") {
-                        this.generation = Math.max(this.generation, owner?.generation ?? 0);
-                        this.adoptOwnership(owner, inspection);
-                        this.state = "active";
-                        this.discordPid = process.pid;
-                        this.startWatchdog();
-                        this.startDiagnostics("retry-adoption");
-                    }
-                    this.options.log("warn", "segunda tentativa falhou mas WireSock está ativo sem conflito; assumindo sucesso por exclusão", { serviços: inspection.services });
-                    return { success: true, state: "active", message: this.statusMessage() };
-                }
-            }
-            if (second.state !== "blocked_external" && this.options.isEnabled() && this.settings().protonUsername && !needsAdminConsent(second.error)) {
+            if (second.state !== "blocked_external" && this.options.isEnabled() && this.settings().protonUsername && !needsAdminConsent(second.error) && !routeTestFailed(second.error)) {
                 this.state = "recovery_required";
                 this.options.log("warn", "ativação inicial falhou; nova tentativa automática agendada", { erro: second.error });
                 this.scheduleRecovery(0);
@@ -392,7 +409,7 @@ export class PluginVpnController {
                 this.externalReason = null;
                 this.state = "stopping";
                 this.options.log("info", "wipeEverything: limpeza forcada total do WireSock acionada");
-                const result = windows.wipeWireSockHard(this.options.log);
+                const result = await windows.wipeWireSockHard(this.options.log);
                 this.discordPid = null;
                 this.pingMs = null;
                 this.routeId = null;
@@ -429,7 +446,8 @@ export class PluginVpnController {
                 return { success: false, state: "blocked_external", error: "A VPN do plugin nesta versão exige Windows x64." };
             }
             this.stopWatchdog();
-            const inspection = windows.inspectWireSock(this.serviceConfigPath);
+            const inspection = await this.inspect();
+            if (!inspection) return { success: false, state: this.state, error: "Estado do WireSock inconclusivo; tente novamente em alguns segundos." };
             if (inspection.active && !inspection.owned) {
                 this.blockExternal(inspection.reason || "WireSock externo está ativo.");
                 return { success: false, state: this.state, error: this.externalReason || undefined };
@@ -554,12 +572,15 @@ export class PluginVpnController {
     }
 
     public async optimizeProton(options: ProtonOptimizationOptions): Promise<proton.ProtonOptimizationResult & { cancelled?: boolean; deferred?: boolean }> {
+        // Verificado fora da fila: dentro dela a otimização anterior já terminou
+        // e um segundo pedido ficaria minutos esperando em vez de ser recusado.
+        if (this.optimizationPending) return { success: false, error: "Já existe uma otimização Proton em andamento." };
+        this.optimizationPending = true;
         return this.serial(async () => {
             if (!isWindows() || process.arch !== "x64") return { success: false, error: "A VPN do plugin nesta versão exige Windows x64." };
             const settings = this.settings();
             const username = normalizeUsername(settings.protonUsername);
             if (!username) return { success: false, error: "Faça login com sua conta Proton antes de otimizar a rota." };
-            if (this.optimization) return { success: false, error: "Já existe uma otimização Proton em andamento." };
 
             const wasActive = (await this.getStatus()).active;
             if (this.state === "blocked_external") return { success: false, error: this.externalReason || "WireSock externo está ativo." };
@@ -574,6 +595,8 @@ export class PluginVpnController {
                 return restored.success ? null : restored.error || "Não foi possível reativar a rota WireGuard anterior.";
             };
 
+            const previousProfile = (() => { try { return fs.readFileSync(this.profilePath, "utf8"); } catch { return null; } })();
+            const previousRoute = { routeId: this.routeId, routeCountry: this.routeCountry, routeCity: this.routeCity, routeLabel: this.routeLabel, pingMs: this.pingMs };
             const id = options.requestId || `proton-${Date.now()}-${Math.random().toString(16).slice(2)}`;
             const controller = new AbortController();
             this.optimization = { id, controller };
@@ -587,6 +610,7 @@ export class PluginVpnController {
                         freeOnly: options.freeOnly ?? settings.protonFreeOnly,
                         autoPing: options.autoPing ?? settings.protonAutoPing,
                         speedTest: options.speedTest === true,
+                        skip: server => this.routeQuarantined(server),
                         signal: controller.signal,
                         onProgress: progress => options.onProgress?.({ ...progress, requestId: id }),
                         log: this.options.log,
@@ -600,19 +624,30 @@ export class PluginVpnController {
                     const restoreError = await restorePreviousRoute();
                     return { success: false, cancelled: true, error: restoreError || "Otimização Proton cancelada." };
                 }
+                // Persistir antes de religar: com relaunch, startInternal chama
+                // app.exit() e nada depois dele chega a executar.
+                this.applyProtonResult(result);
                 if (result.success && wasActive) {
                     const restartError = await restorePreviousRoute();
+                    if (restartError && routeTestFailed(restartError) && previousProfile) {
+                        // A rota nova não passa tráfego: volta para a que funcionava.
+                        this.writeProfileAtomically(previousProfile);
+                        Object.assign(this, previousRoute);
+                        this.persistRouteSnapshot();
+                        const back = await this.startInternal(false);
+                        this.options.log("warn", "rota nova reprovada; rota anterior restaurada", { nova: result.server, religada: back.success, erro: back.error });
+                        return { ...result, success: false, error: `A rota ${result.server || "nova"} não passa tráfego e ficou em quarentena por 6h; a rota anterior foi restaurada${back.success ? "." : `, mas não religou: ${back.error}`}` };
+                    }
                     if (restartError) return { ...result, success: false, error: restartError };
                 } else if (!result.success && wasActive) {
                     const restoreError = await restorePreviousRoute();
                     if (restoreError) return { ...result, error: `${result.error || "A otimização falhou."} ${restoreError}` };
                 }
-                this.applyProtonResult(result);
                 return result;
             } finally {
                 this.optimization = null;
             }
-        });
+        }).finally(() => { this.optimizationPending = false; });
     }
 
     public cancelOptimization(requestId: string): boolean {
@@ -627,13 +662,16 @@ export class PluginVpnController {
         const countriesArg = Array.isArray(countries) && countries.length > 0
             ? countries.map(c => String(c).trim().toUpperCase()).filter(Boolean).join(",")
             : undefined;
+        // Mostra só rotas que generateOptimalProtonConfig aceita aplicar.
         return proton.listAvailableServers(this.dataDir, {
             username,
             countries: countriesArg,
             freeOnly: settings.protonFreeOnly,
             p2pOnly: true,
             log: this.options.log,
-        });
+        }).then(result => result.success && result.servers
+            ? { ...result, servers: result.servers.filter(server => proton.isOptimizationRouteAllowed(server) && !this.routeQuarantined(server)) }
+            : result);
     }
 
     public applySelectedRoute(options: { country?: string; serverId?: string }): Promise<proton.ProtonOptimizationResult & { cancelled?: boolean; deferred?: boolean }> {
@@ -659,11 +697,10 @@ export class PluginVpnController {
                 log: this.options.log,
             });
             if (!listed.success || !listed.servers) return { success: false, checked: false, changed: false, error: listed.error || "Não foi possível consultar as rotas." };
-            const current = listed.servers.find(server => {
-                const id = server.id.toLowerCase();
-                const name = server.name.toLowerCase();
-                return Boolean(currentId && (id === currentId || name === currentId || id.includes(currentId) || currentId.includes(id)));
-            });
+            // Comparação exata: substring confundia US-NY#1 com US-NY#10.
+            const current = currentId
+                ? listed.servers.find(server => server.id.toLowerCase() === currentId || server.name.toLowerCase() === currentId)
+                : undefined;
             const currentLoad = current?.load;
             if (typeof currentLoad !== "number" || currentLoad <= AUTO_ROUTE_LOAD_LIMIT)
                 return { success: true, checked: true, changed: false, currentLoad, server: current?.name, load: currentLoad, pingMs: current?.pingMs };
@@ -672,7 +709,7 @@ export class PluginVpnController {
             // testar dezenas de servidores desnecessariamente.
             const pingCandidates = listed.servers
                 .filter(proton.isOptimizationRouteAllowed)
-                .filter(server => server.id !== current?.id && typeof server.load === "number" && server.load <= AUTO_ROUTE_LOAD_LIMIT)
+                .filter(server => server.id !== current?.id && !this.routeQuarantined(server) && typeof server.load === "number" && server.load < currentLoad)
                 .sort((a, b) => (a.load ?? 100) - (b.load ?? 100) || a.country.localeCompare(b.country) || a.name.localeCompare(b.name))
                 .slice(0, AUTO_ROUTE_PING_CANDIDATES);
             const selected = pingCandidates
@@ -681,6 +718,15 @@ export class PluginVpnController {
             const result = await this.optimizeProton({ serverId: selected.id, autoPing: true, speedTest: false, relaunch: false });
             return { ...result, checked: true, changed: result.success === true, currentLoad, selectedServer: selected.name, pingCandidates: pingCandidates.length };
         })();
+    }
+
+    private async inspect(): Promise<windows.WireSockInspection | null> {
+        try {
+            return await windows.inspectWireSockAsync(this.serviceConfigPath);
+        } catch (error) {
+            this.options.log("warn", "consulta do WireSock inconclusiva", { erro: errorMessage(error) });
+            return null;
+        }
     }
 
     private settings(): VpnSettings {
@@ -833,13 +879,14 @@ export class PluginVpnController {
             this.externalReason = "A VPN do plugin nesta versão está disponível somente no Windows x64.";
             return { success: false, state: this.state, error: this.externalReason };
         }
-        let existing = await windows.inspectWireSockAsync(this.serviceConfigPath);
-        if (existing.active && !existing.owned) {
-            for (let attempt = 0; attempt < 3 && existing.active && !existing.owned; attempt++) {
-                await new Promise<void>(r => setTimeout(r, 600));
-                existing = await windows.inspectWireSockAsync(this.serviceConfigPath);
-            }
+        // Estados transitórios (StartPending/StopPending) fazem a consulta
+        // falhar; devolve um resultado em vez de rejeitar a operação inteira.
+        let existing = await this.inspect();
+        for (let attempt = 0; attempt < 3 && (!existing || (existing.active && !existing.owned)); attempt++) {
+            await new Promise<void>(r => setTimeout(r, 600));
+            existing = await this.inspect();
         }
+        if (!existing) return { success: false, state: this.state, error: "Estado do WireSock inconclusivo; tente novamente em alguns segundos." };
         if (existing.active && existing.owned) {
             const owner = this.readOwner();
             if (owner && owner.pid !== process.pid && processAlive(owner.pid) && !owner.restarting) {
@@ -853,6 +900,7 @@ export class PluginVpnController {
                 this.discordPid = process.pid;
                 this.startWatchdog();
                 this.startDiagnostics("adoption");
+                this.verifyAdoptedRoute("adoption");
                 void this.ensurePingFromExistingProfile();
             }
             return { success: true, state: "active", message: this.statusMessage() };
@@ -905,7 +953,7 @@ export class PluginVpnController {
             } else {
                 const endpoint = this.readEndpointFromProfile();
                 if (endpoint?.country && !this.routeCountry) this.routeCountry = endpoint.country;
-                if (endpoint?.hostname && !this.routeId) this.routeId = endpoint.hostname.slice(0, 160);
+                if (endpoint?.hostname && !this.routeId && !isIpAddress(endpoint.hostname)) this.routeId = endpoint.hostname.slice(0, 160);
                 if (!this.routeLabel) this.routeLabel = this.buildRouteLabel();
                 void this.ensurePingFromExistingProfile();
             }
@@ -928,6 +976,9 @@ export class PluginVpnController {
             this.state = relaunch ? "restart_pending" : "active";
             this.startWatchdog();
             this.startDiagnostics("activation");
+            // Testa antes de qualquer reinício: depois do relaunch não há como
+            // devolver a rota anterior.
+            if (await this.routeCarriesNoTraffic("activation")) throw new Error(ROUTE_FAILURE_MESSAGE);
             if (relaunch) {
                 if (!this.requestRelaunch()) {
                     this.state = "active";
@@ -940,7 +991,7 @@ export class PluginVpnController {
             return { success: true, state: "active", message: this.statusMessage() };
         } catch (error) {
             this.stopWatchdog();
-            if (started || windows.inspectWireSock(this.serviceConfigPath).active) {
+            if (started || (await this.inspect())?.active !== false) {
                 // Mesmo depois de uma ativação parcial, nunca use a limpeza
                 // global automaticamente. A inspeção do perfil/serviço é a
                 // única prova autorizada para parar o que pertence ao plugin;
@@ -957,7 +1008,9 @@ export class PluginVpnController {
             this.state = "inactive";
             const message = errorMessage(error);
             this.setDiagnostic("wireguard", false, message);
-            this.options.log("error", "ativação VPN falhou", { erro: message });
+            // Rota reprovada e UAC recusado são resultados esperados, não defeitos:
+            // ficam no log local sem gerar relatório de erro.
+            this.options.log(routeTestFailed(message) || needsAdminConsent(message) ? "warn" : "error", "ativação VPN falhou", { erro: message });
             return { success: false, state: this.state, error: message };
         }
     }
@@ -965,7 +1018,11 @@ export class PluginVpnController {
     private async stopInternal(relaunch: boolean, forceNuclear = false): Promise<VpnOperationResult> {
         if (!isSupportedWindowsArchitecture(process.platform, process.arch)) return { success: false, state: "blocked_external", error: "A VPN do plugin nesta versão exige Windows x64." };
         this.stopWatchdog();
-        const inspection = windows.inspectWireSock(this.serviceConfigPath);
+        const inspection = await this.inspect();
+        if (!inspection) {
+            this.state = "recovery_required";
+            return { success: false, state: this.state, error: "Estado do WireSock inconclusivo; a rede não foi alterada." };
+        }
         const owner = this.readOwner();
         const needsInactiveCleanup = Boolean(owner)
             || this.state === "preparing"
@@ -1010,14 +1067,104 @@ export class PluginVpnController {
         return { success: true, state: this.state, message: this.statusMessage() };
     }
 
+    // Só o Discord em si. O Update.exe fica fora do túnel: a verificação de
+    // atualização da inicialização nunca pode depender da rota VPN.
     private discordAllowedApps(): string[] {
-        const executable = path.resolve(process.execPath);
-        const appDir = path.dirname(executable);
-        const installRoot = path.dirname(appDir);
-        const updater = path.join(installRoot, "Update.exe");
-        const values = [executable];
-        if (fs.existsSync(updater)) values.push(path.resolve(updater));
-        return values;
+        return [path.resolve(process.execPath)];
+    }
+
+    /**
+     * Um túnel que não carrega tráfego deixa o Discord inteiro sem rede (tela
+     * travada, "checking for updates" infinito). O probe roda pelo túnel; só
+     * uma resposta explícita de falha conta como prova. Probe ausente ou com
+     * saída ilegível não derruba nada.
+     */
+    private quarantinePath(): string {
+        return path.join(this.dataDir, "route-quarantine.json");
+    }
+
+    private readQuarantine(): Array<{ server: string | null; country: string | null; city: string | null; until: number }> {
+        try {
+            const raw = JSON.parse(fs.readFileSync(this.quarantinePath(), "utf8")) as unknown;
+            return Array.isArray(raw) ? raw.filter(entry => entry && typeof entry.until === "number" && entry.until > Date.now()) : [];
+        } catch { return []; }
+    }
+
+    // Uma rota reprovada fica fora das escolhas automáticas por 6h. A cidade
+    // inteira também: as falhas observadas são por datacenter (US-FREE#134 e
+    // #142, ambos em 194.180.34.x).
+    private routeQuarantined(server: { id?: string; name?: string; country?: string; city?: string }): boolean {
+        const name = (server.name || server.id || "").toLowerCase();
+        const country = (server.country || "").toUpperCase();
+        const city = (server.city || "").toLowerCase();
+        return this.readQuarantine().some(entry =>
+            (entry.server && entry.server.toLowerCase() === name)
+            || (entry.city && city && entry.city.toLowerCase() === city && (entry.country || "").toUpperCase() === country));
+    }
+
+    private quarantineCurrentRoute(): void {
+        if (!this.routeId && !this.routeCity) return;
+        const entries = this.readQuarantine();
+        entries.push({ server: this.routeId, country: this.routeCountry, city: this.routeCity, until: Date.now() + ROUTE_QUARANTINE_MS });
+        try { fs.writeFileSync(this.quarantinePath(), JSON.stringify(entries.slice(-50)), "utf8"); } catch { /* opcional */ }
+        this.options.log("warn", "rota colocada em quarentena por 6h", { rota: this.routeId, cidade: this.routeCity });
+    }
+
+    private routeFailurePath(): string {
+        return path.join(this.dataDir, "route-failed.json");
+    }
+
+    private profileStamp(): number | null {
+        try { return fs.statSync(this.profilePath).mtimeMs; } catch { return null; }
+    }
+
+    private routeKnownBroken(): boolean {
+        try {
+            const marker = JSON.parse(fs.readFileSync(this.routeFailurePath(), "utf8")) as { profileMtime?: unknown };
+            const stamp = this.profileStamp();
+            return stamp !== null && marker.profileMtime === stamp;
+        } catch { return false; }
+    }
+
+    private rememberRouteFailure(): void {
+        const stamp = this.profileStamp();
+        if (stamp === null) return;
+        try { fs.writeFileSync(this.routeFailurePath(), JSON.stringify({ profileMtime: stamp, at: Date.now() }), "utf8"); } catch { /* opcional */ }
+    }
+
+    private async routeCarriesNoTraffic(stage: string): Promise<boolean> {
+        const probePath = this.readOwner()?.probePath ?? this.probePath;
+        if (!probePath || !fs.existsSync(probePath)) return false;
+        let last: Record<string, unknown> | null = null;
+        for (let attempt = 1; attempt <= 2; attempt++) {
+            await new Promise<void>(resolve => setTimeout(resolve, attempt === 1 ? 4_000 : 6_000));
+            last = await windows.runRouteProbe(probePath).catch(() => null);
+            if (!last) return false;
+            // success sozinho não basta: o IPv6 pode sair direto pela rede local
+            // e ainda assim "achar" um IP público. Só discordOk prova a rota.
+            if (last.success === true && last.discordOk === true) {
+                this.options.log("info", "teste de rota do Discord confirmou saída pela VPN", { stage, tentativa: attempt });
+                try { fs.rmSync(this.routeFailurePath(), { force: true }); } catch { /* opcional */ }
+                return false;
+            }
+            this.options.log("warn", "teste de rota do Discord não confirmou saída pela VPN", { stage, tentativa: attempt, result: safeDiagnosticDetail(JSON.stringify(last), 500) });
+        }
+        this.setDiagnostic("route", false, safeDiagnosticDetail(JSON.stringify(last), 500));
+        this.rememberRouteFailure();
+        this.quarantineCurrentRoute();
+        return true;
+    }
+
+    private verifyAdoptedRoute(stage: string): void {
+        const generation = this.generation;
+        void this.serial(async () => {
+            if (this.state !== "active" || generation !== this.generation) return;
+            if (!await this.routeCarriesNoTraffic(stage)) return;
+            if (this.state !== "active" || generation !== this.generation) return;
+            const result = await this.stopInternal(false);
+            this.setDiagnostic("route", false, ROUTE_FAILURE_MESSAGE);
+            this.options.log("warn", "VPN desligada: a rota adotada não passa tráfego", { stage, sucesso: result.success, erro: result.error });
+        }).catch(error => this.options.log("warn", "verificação da rota adotada falhou", { erro: errorMessage(error) }));
     }
 
     private prepareRouteProbe(): string | undefined {
@@ -1070,7 +1217,7 @@ export class PluginVpnController {
             try {
                 const owner = this.readOwner();
                 if (owner && owner.pid !== process.pid && !processAlive(owner.pid)) {
-                    void this.stopInternal(false, false).then(result => {
+                    void this.serial(() => this.stopInternal(false, false)).then(result => {
                         this.options.log(result.success ? "info" : "warn", "watchdog encerrou a sessão WireSock após a morte do Discord dono", { pid: owner.pid, sucesso: result.success, erro: result.error });
                     }).catch(error => {
                         this.options.log("error", "watchdog não conseguiu derrubar WireSock do PID morto", { erro: errorMessage(error) });
@@ -1079,7 +1226,7 @@ export class PluginVpnController {
                 }
                 if (this.discordPid !== null && this.discordPid !== process.pid && !processAlive(this.discordPid)) {
                     const discordPid = this.discordPid;
-                    void this.stopInternal(false, false).then(result => {
+                    void this.serial(() => this.stopInternal(false, false)).then(result => {
                         this.options.log(result.success ? "info" : "warn", "watchdog encerrou a sessão WireSock após a morte do Discord", { pid: discordPid, sucesso: result.success, erro: result.error });
                     }).catch(error => {
                         this.options.log("error", "watchdog não conseguiu derrubar WireSock do Discord PID morto", { erro: errorMessage(error) });
@@ -1157,6 +1304,7 @@ export class PluginVpnController {
                         this.externalReason = null;
                         this.startWatchdog();
                         this.startDiagnostics("recovery-adoption");
+                        this.verifyAdoptedRoute("recovery-adoption");
                         this.options.log("info", "WireSock reiniciado pelo Windows; sessão recuperada automaticamente");
                         return;
                     }
@@ -1167,6 +1315,10 @@ export class PluginVpnController {
                         tentativa: attempt + 1, sucesso: result.success, erro: result.error,
                     });
                     if (result.success || result.state === "blocked_external") return;
+                    if (routeTestFailed(result.error)) {
+                        this.options.log("warn", "recuperação automática encerrada: a rota não passa tráfego");
+                        return;
+                    }
                     if (needsAdminConsent(result.error)) {
                         this.state = "recovery_required";
                         this.options.log("error", "recuperação automática pausada: o Windows exige autorização de administrador");

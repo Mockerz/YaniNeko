@@ -244,23 +244,13 @@ function readRouteInfo(): { routeId: string | null; pingMs: number | null } {
 }
 
 function extractRouteIdFromEndpoint(endpoint: unknown): string | null {
-    if (typeof endpoint !== "string" || !endpoint) return null;
+    if (typeof endpoint !== "string" || !endpoint || endpoint.startsWith("[")) return null;
     const withoutPort = endpoint.includes(":") ? endpoint.slice(0, endpoint.indexOf(":")) : endpoint;
+    // Endpoints Proton são IPs; o primeiro octeto ("194") não identifica rota.
+    if (/^\d{1,3}(?:\.\d{1,3}){3}$/.test(withoutPort)) return null;
     const parts = withoutPort.split(".").filter(Boolean);
     if (!parts.length) return null;
     return parts[0].trim().toLowerCase() || null;
-}
-
-function extractRouteIdFromProfile(profilePath: string | null): string | null {
-    try {
-        if (!profilePath || !existsSync(profilePath)) return null;
-        const text = readFileSync(profilePath, "utf8");
-        const match = /^\s*Endpoint\s*=\s*(\S+)/m.exec(text);
-        if (!match || !match[1]) return null;
-        return extractRouteIdFromEndpoint(match[1]);
-    } catch {
-        return null;
-    }
 }
 
 const history: string[] = [];
@@ -596,9 +586,9 @@ function solveCaptcha(rawUrl: string, parent: BrowserWindow | null): Promise<Cap
     });
 }
 
-export function enable(_: IpcMainInvokeEvent, relaunch: unknown = false) {
+export function enable(_: IpcMainInvokeEvent, relaunch: unknown = false, automatic: unknown = false) {
     const shouldRelaunch = relaunch === true || relaunch === "true";
-    return controller.enable(shouldRelaunch);
+    return controller.enable(shouldRelaunch, automatic === true);
 }
 
 export function recoverAndStart(_: IpcMainInvokeEvent) {
@@ -695,15 +685,13 @@ export function restoreNetwork(_: IpcMainInvokeEvent) {
 }
 
 export async function getVpnStatus(_: IpcMainInvokeEvent) {
+    // O controller é a fonte de verdade (route-snapshot.json, atualizado por
+    // toda otimização, inclusive a automática). route-info.json só preenche
+    // lacunas de instalações antigas, e IDs numéricos dele são ignorados.
     const base = await controller.getStatus();
     const routeInfo = readRouteInfo();
-    let routeId: string | null = routeInfo.routeId;
-    let pingMs: number | null = routeInfo.pingMs;
-    if (!routeId) {
-        routeId = extractRouteIdFromProfile(base.profilePath);
-        if (routeId && !routeInfo.routeId) saveRouteInfo(routeId, pingMs);
-    }
-    return { ...base, routeId, pingMs };
+    const legacyRouteId = routeInfo.routeId && !/^\d+$/.test(routeInfo.routeId) ? routeInfo.routeId : null;
+    return { ...base, routeId: base.routeId ?? legacyRouteId, pingMs: base.pingMs ?? routeInfo.pingMs };
 }
 
 export function autoOptimizeRoute(_: IpcMainInvokeEvent) {
@@ -890,33 +878,26 @@ app.on("before-quit", event => {
     event.preventDefault();
     quitting = true;
     log("info", "before-quit: encerrando somente a sessão WireSock do plugin");
+    // O túnel só afeta os executáveis do Discord (AllowedApps). Se a limpeza
+    // falhar, o Discord fecha mesmo assim: manter um processo sem janela é pior
+    // e o próximo início adota ou limpa a sessão marcada no owner.lock.
     void controller.shutdown(false, false).then(result => {
-        if (result.success || result.state === "blocked_external") {
-            if (result.state === "blocked_external")
-                log("warn", "before-quit: WireSock externo preservado; encerrando o Discord");
-            app.exit(0);
-            return;
-        }
-        quitting = false;
-        log("error", "fechamento aguardou porque a restauração da VPN não foi confirmada", { estado: result.state, erro: result.error });
+        if (result.state === "blocked_external")
+            log("warn", "before-quit: WireSock externo preservado; encerrando o Discord");
+        else if (!result.success)
+            log("error", "before-quit: restauração da VPN não confirmada; encerrando o Discord mesmo assim", { estado: result.state, erro: result.error });
     }).catch(error => {
-        quitting = false;
         log("error", "falha ao restaurar a rede antes do fechamento", { erro: safeDiagnosticDetail(error) });
-    });
+    }).finally(() => app.exit(0));
 });
 
 app.on("window-all-closed", () => {
     if (quitting) return;
     void controller.shutdown(false, false).then(result => {
-        if (result.success || result.state === "blocked_external") {
-            log(result.success ? "info" : "warn", "wireguard tratado depois que todas as janelas fecharam", { estado: result.state, erro: result.error });
-            app.quit();
-        } else {
-            log("error", "Discord permaneceu aberto porque a VPN própria não foi restaurada", { estado: result.state, erro: result.error });
-        }
+        log(result.success ? "info" : "warn", "wireguard tratado depois que todas as janelas fecharam", { estado: result.state, erro: result.error });
     }).catch(error => {
         log("error", "falha ao derrubar VPN no window-all-closed", { erro: safeDiagnosticDetail(error) });
-    });
+    }).finally(() => { quitting = true; app.quit(); });
 });
 
 const shutdownSignal = (source: string) => {
