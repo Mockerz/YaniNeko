@@ -18,7 +18,7 @@ vm.runInNewContext(code, {
         calls.push(args);
         if (args.includes("-list-servers")) return { code: 0, stdout: JSON.stringify(servers) };
         fs.writeFileSync(args[args.indexOf("-output") + 1], "new profile");
-        return { code: 0, json: { success: true, country: "US", server: "US#1", load: 75, downloadMbps: 5, uploadMbps: 5, ...result } };
+        return { code: 0, json: { success: true, country: "US", server: "US#1", load: 85, downloadMbps: 5, uploadMbps: 5, ...result } };
     },
 });
 const api = moduleStub.exports;
@@ -26,8 +26,8 @@ function reset() {
     calls = []; result = {};
     servers = [
         ...["JP", "CH", "PL", "RO", "BR"].map(country => ({ name: `${country}#1`, country, load: 10 })),
-        { name: "US#1", country: "US", load: 75 },
-        { name: "US#2", country: "US", load: 76 },
+        { name: "US#1", country: "US", load: 85 },
+        { name: "US#2", country: "US", load: 86 },
         { name: "NL#1", country: "NL", load: 0 },
     ];
     fs.writeFileSync(path.join(dir, "wireguard.conf"), "old profile");
@@ -53,13 +53,13 @@ function reset() {
         reset(); servers = servers.filter(s => s.country === "JP");
         assert.equal((await api.generateOptimalProtonConfig(dir, { username: "test" })).success, false);
         assert.equal(calls.length, 1);
-        for (const changed of [{ country: "jp" }, { load: 85 }]) {
+        for (const changed of [{ country: "jp" }, { load: 95 }]) {
             reset(); result = changed;
             assert.equal((await api.generateOptimalProtonConfig(dir, { username: "test" })).success, false);
             assert.equal(fs.readFileSync(path.join(dir, "wireguard.conf"), "utf8"), "old profile");
             assert.equal(fs.readdirSync(dir).filter(n => n.endsWith(".tmp")).length, 0);
         }
-        console.log("PASS: excluded countries, 75% boundary, zero load, speed-test flags, manual selection, no eligible routes, changed result preserves profile");
+        console.log("PASS: excluded countries, 85% boundary, zero load, speed-test flags, manual selection, no eligible routes, changed result preserves profile");
     } finally {
         assert.ok(fs.realpathSync(dir).startsWith(fs.realpathSync(__dirname) + path.sep));
         fs.rmSync(dir, { recursive: true, force: true });

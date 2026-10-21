@@ -30,7 +30,6 @@ const Native = VencordNative?.pluginHelpers?.LefferzinBypass as PluginNative<typ
 const logger = new Logger("Lefferzin Bypass");
 
 function showToast(message: string, type: "message" | "success" | "failure" = "message"): void {
-    if (type === "failure") reportError(message);
     try {
         discordShowToast({ text: message, variant: type === "failure" ? "critical" : type === "success" ? "success" : "default" });
     } catch (error) {
@@ -196,9 +195,9 @@ async function checkRouteAutomatically(): Promise<void> {
             const load = typeof result.currentLoad === "number" ? ` (carga anterior: ${result.currentLoad}%)` : "";
             showToast(`Rota limpa ativada: ${selected}${load}. Discord continua conectado.`, "success");
             await refreshPresenceStatus();
-        } else if (result?.checked === true && typeof result.currentLoad === "number" && result.currentLoad > 70) {
+        } else if (result?.checked === true && typeof result.currentLoad === "number" && result.currentLoad > 90) {
             const candidates = typeof result.pingCandidates === "number" ? ` Foram comparadas ${result.pingCandidates} rotas de menor carga.` : "";
-            showToast(`Rota atual acima de 70% (${Math.round(result.currentLoad)}%). Não foi possível trocar a rota.${candidates}`, "message");
+            showToast(`Rota atual acima de 90% (${Math.round(result.currentLoad)}%). Não foi possível trocar a rota.${candidates}`, "message");
         }
     } catch (error) {
         if (!pluginRunning || generation !== pluginGeneration) return;
@@ -229,6 +228,9 @@ async function refreshPresenceStatus(): Promise<void> {
         if (!pluginRunning || generation !== pluginGeneration) return;
         notifyVpnStatus(status);
         if (status.active === true) {
+            // Vale para qualquer origem da ativação (boot, Logar, Start Bypass,
+            // Recuperar), não só para o enable automático da inicialização.
+            startAutomaticRouteMonitor();
             startPresence(status.routeId, status.routeCountry, status.routeCity, status.pingMs);
             updateRouteInfo(status.routeId, status.routeCountry, status.routeCity, status.pingMs);
         } else {
@@ -370,6 +372,10 @@ const settings = definePluginSettings({
 interface PluginVpnStatus {
     state: string;
     active: boolean;
+    owned?: boolean;
+    generation?: number;
+    profilePath?: string | null;
+    configPath?: string | null;
     message: string;
     externalReason: string | null;
     lastDiagnostic: { detail: string; ok: boolean; kind: string } | null;
@@ -1170,11 +1176,15 @@ export default definePlugin({
             const hasSession = typeof (settings as { sessionUsername?: unknown })?.sessionUsername === "string"
                 && (settings as { sessionUsername: string }).sessionUsername.trim() !== "";
             if (!hasUsername && !hasSession) return;
-            void Native.enable(false).then(result => {
+            void Native.enable(false, true).then(result => {
                 if (!isCurrent()) return;
                 if (result?.success === true) {
                     startAutomaticRouteMonitor();
                     void refreshPresenceStatus();
+                } else if (String(result?.error || "").includes("não passou no teste do Discord")) {
+                    // Rota conhecida como quebrada: aviso simples, sem relatório de erro.
+                    void refreshPresenceStatus();
+                    showToast(`Lefferzin Bypass: ${result?.error}`, "message");
                 } else {
                     void refreshPresenceStatus();
                     showToast(`Lefferzin Bypass não conseguiu ativar a VPN: ${result?.error || result?.message || "rode o 0-LIMPAR-WIRESOCK.bat"}`, "failure");

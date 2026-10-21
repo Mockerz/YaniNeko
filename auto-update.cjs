@@ -267,7 +267,7 @@ async function check(root, { force = false } = {}) {
         if (error.code !== "EEXIST") throw error;
         const owner = read(lock);
         if (alive(owner?.pid) || Date.now() - fs.statSync(lock).mtimeMs < 60_000) return;
-        fs.unlinkSync(lock); return check(root);
+        fs.unlinkSync(lock); return check(root, { force });
     }
     fs.writeFileSync(fd, JSON.stringify({ pid: process.pid })); fs.closeSync(fd);
     let work;
@@ -287,7 +287,9 @@ async function check(root, { force = false } = {}) {
         const sha = commit.sha;
         if (typeof sha !== "string" || !/^[a-f0-9]{40}$/.test(sha)) throw new Error("Invalid commit response");
         if (sha === state.active || sha === state.commit) { notify(root, "current"); return; }
-        if (sha === state.rejected) { notify(root, "error"); return; }
+        // Already reported when it was rejected; repeating the toast every
+        // interval only alarms the user until a newer commit exists.
+        if (sha === state.rejected) { log(root, `Revision ${sha} was rejected earlier; waiting for a newer commit`); return; }
         notify(root, "available");
         log(root, `Preparing revision ${sha}`);
         work = inside(base, `work-${crypto.randomUUID()}`);
