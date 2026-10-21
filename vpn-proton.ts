@@ -98,18 +98,6 @@ const GENERIC_PLAN_ERROR = "Não foi possível confirmar o plano Proton.";
 let confgenQueue: Promise<unknown> = Promise.resolve();
 const CONFGEN_LOCK_PATH = path.join(os.tmpdir(), "lefferzin-proton-confgen.lock");
 
-function lockOwnerAlive(pid: number): boolean {
-    // PID ilegível conta como vivo; o limite de 10 minutos ainda se aplica.
-    if (!Number.isInteger(pid) || pid <= 0) return true;
-    if (pid === process.pid) return true;
-    try {
-        process.kill(pid, 0);
-        return true;
-    } catch (error) {
-        return (error as { code?: unknown })?.code === "EPERM";
-    }
-}
-
 async function acquireConfgenLock(): Promise<() => void> {
     const deadline = Date.now() + 30_000;
     while (Date.now() < deadline) {
@@ -130,11 +118,8 @@ async function acquireConfgenLock(): Promise<() => void> {
             const code = (error as { code?: unknown })?.code;
             if (code !== "EEXIST") throw error;
             try {
-                // Lock de um processo que morreu (crash do Discord) não pode
-                // bloquear o Proton por 10 minutos: confere o PID gravado.
                 const age = Date.now() - fs.statSync(CONFGEN_LOCK_PATH).mtimeMs;
-                const owner = Number.parseInt(fs.readFileSync(CONFGEN_LOCK_PATH, "utf8").split(/\r?\n/)[0], 10);
-                if (age > 10 * 60_000 || (age > 2_000 && !lockOwnerAlive(owner))) fs.rmSync(CONFGEN_LOCK_PATH, { force: true });
+                if (age > 10 * 60_000) fs.rmSync(CONFGEN_LOCK_PATH, { force: true });
             } catch {}
             await new Promise(resolve => setTimeout(resolve, 250));
         }
@@ -269,9 +254,7 @@ export interface ProtonServerEntry {
 }
 
 const OPTIMIZATION_EXCLUDED_COUNTRIES = ["BR", "JP", "CH", "PL", "RO"];
-// Servidores free costumam ficar entre 75% e 85%; com 75% sobravam poucas
-// rotas e o otimizador caía sempre nas mesmas (inclusive em datacenters fora do ar).
-const OPTIMIZATION_MAX_LOAD = 85;
+const OPTIMIZATION_MAX_LOAD = 75;
 
 export function isOptimizationRouteAllowed(server: { country?: string; load?: number }): boolean {
     return !OPTIMIZATION_EXCLUDED_COUNTRIES.includes(server.country?.trim().toUpperCase() || "")
@@ -561,8 +544,6 @@ export async function generateOptimalProtonConfig(
         freeOnly?: boolean;
         autoPing?: boolean;
         speedTest?: boolean;
-        /** Rotas que o chamador sabe estarem quebradas (quarentena). */
-        skip?: (server: ProtonServerEntry) => boolean;
         signal?: AbortSignal;
         onProgress?: (progress: ProtonOptimizationProgress) => void;
         log?: RunConfgenOptions["log"];
@@ -585,11 +566,10 @@ export async function generateOptimalProtonConfig(
         if (!available.success || !Array.isArray(available.servers)) {
             return { success: false, error: available.error || "Não foi possível consultar as rotas Proton." };
         }
-        const allowed = (server: ProtonServerEntry) => isOptimizationRouteAllowed(server) && !options.skip?.(server);
-        const eligible = available.servers.filter(allowed);
-        excludedServers = available.servers.filter(server => !allowed(server)).map(server => server.name);
+        const eligible = available.servers.filter(isOptimizationRouteAllowed);
+        excludedServers = available.servers.filter(server => !isOptimizationRouteAllowed(server)).map(server => server.name);
         if (eligible.length === 0) {
-            return { success: false, error: `Nenhuma rota disponível após excluir BR, JP, CH, PL, RO e servidores com carga acima de ${OPTIMIZATION_MAX_LOAD}%.` };
+            return { success: false, error: "Nenhuma rota disponível após excluir BR, JP, CH, PL, RO e servidores com carga acima de 75%." };
         }
         if (selectedServer) {
             const selected = eligible.find(server =>
@@ -597,7 +577,7 @@ export async function generateOptimalProtonConfig(
                 || server.name.toLowerCase() === selectedServer.toLowerCase()
             );
             if (!selected) {
-                return { success: false, error: `A rota selecionada está indisponível, em um país excluído ou com carga acima de ${OPTIMIZATION_MAX_LOAD}%.` };
+                return { success: false, error: "A rota selecionada está indisponível, em um país excluído ou com carga acima de 75%." };
             }
             selectedServer = selected.name;
         }
@@ -623,7 +603,7 @@ export async function generateOptimalProtonConfig(
             if (!isOptimizationRouteAllowed({
                 country: typeof result.json.country === "string" ? result.json.country : undefined,
                 load: typeof result.json.load === "number" ? result.json.load : undefined,
-            })) return { success: false, error: `A rota retornada está em um país excluído ou ultrapassou ${OPTIMIZATION_MAX_LOAD}% de carga. O perfil anterior foi preservado.` };
+            })) return { success: false, error: "A rota retornada está em um país excluído ou ultrapassou 75% de carga. O perfil anterior foi preservado." };
             fs.renameSync(staging, output);
             return {
                 success: true,

@@ -6,7 +6,7 @@ export function redactReport(value: string): string {
         .replace(/\bBearer\s+\S+/gi, "Bearer <removido>")
         .replace(/\b[A-Za-z0-9+/]{43}=/g, "<chave removida>")
         .replace(/\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/gi, "<email removido>")
-        .replace(/(?<!version[=:]\s?)\b(?:\d{1,3}\.){3}\d{1,3}\b/gi, "<ip removido>")
+        .replace(/\b(?:\d{1,3}\.){3}\d{1,3}\b/g, "<ip removido>")
         .replace(/\b(?:[a-f0-9]{0,4}:){2,}[a-f0-9:]{0,39}\b/gi, value => value.includes("::") || (value.match(/:/g)?.length ?? 0) >= 7 ? "<ipv6 removido>" : value)
         .replace(/[A-Z]:\\Users\\[^\\\r\n]+/gi, "<perfil local>")
         .replace(/\b[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{6,}\.[A-Za-z0-9_-]{20,}\b/g, "<token removido>");
