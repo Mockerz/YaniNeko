@@ -21,9 +21,6 @@ from pathlib import Path
 REPO = "Mockerz/YaniNeko"
 PLUGIN_BRANCH = "main"
 VENCORD_REPO = "https://github.com/Vendicated/Vencord.git"
-# Commit validado com o plugin. Atualize deliberadamente após testar: seguir o
-# HEAD de main deixava qualquer mudança do Vencord quebrar build ou patches.
-VENCORD_COMMIT = "b0e636df2ed5c9006b80ddc6644bc41110404bc3"
 PNPM_VERSION = "11.9.0"
 PNPM_COMMAND: list[str] = []
 CURRENT_STEP = "Verificando requisitos"
@@ -157,7 +154,6 @@ def install_git(tools: Path):
     step("[1/8] Instalando Git portátil")
     zip_path = tools / "mingit.zip"
     git_dir = tools / "git"
-    digest = None
     try:
         request = urllib.request.Request(
             "https://api.github.com/repos/git-for-windows/git/releases/latest",
@@ -169,16 +165,10 @@ def install_git(tools: Path):
         if not assets:
             fail("A API do Git não retornou MinGit x64.")
         url = assets[0]["browser_download_url"]
-        # A API do GitHub publica "sha256:<hex>" para cada asset de release.
-        raw_digest = str(assets[0].get("digest") or "")
-        digest = raw_digest.split(":", 1)[1].lower() if raw_digest.startswith("sha256:") else None
     except Exception as exc:
         log(f"API do Git indisponível ({exc}); usando fallback fixo.")
         url = "https://github.com/git-for-windows/git/releases/download/v2.51.0.windows.1/MinGit-2.51.0-64-bit.zip"
     download(url, zip_path)
-    if digest and hashlib.sha256(zip_path.read_bytes()).hexdigest() != digest:
-        zip_path.unlink(missing_ok=True)
-        fail("O SHA256 do MinGit não confere com o publicado pelo GitHub.")
     shutil.rmtree(git_dir, ignore_errors=True)
     extract_zip(zip_path, git_dir)
     git_exe = git_dir / "cmd" / "git.exe"
@@ -215,15 +205,7 @@ def install_node(tools: Path):
     version = release["version"]
     archive = tools / "node.zip"
     node_dir = tools / "node"
-    zip_name = f"node-{version}-win-{arch}.zip"
-    download(f"https://nodejs.org/dist/{version}/{zip_name}", archive)
-    request = urllib.request.Request(f"https://nodejs.org/dist/{version}/SHASUMS256.txt", headers={"User-Agent": "YaniNeko-installer/1.0"})
-    with urllib.request.urlopen(request, timeout=60) as response:
-        sums = response.read().decode("utf-8", errors="replace")
-    expected = next((line.split()[0].lower() for line in sums.splitlines() if line.strip().endswith(" " + zip_name)), None)
-    if not expected or hashlib.sha256(archive.read_bytes()).hexdigest() != expected:
-        archive.unlink(missing_ok=True)
-        fail(f"O SHA256 do Node.js {version} não confere com o SHASUMS256.txt oficial.")
+    download(f"https://nodejs.org/dist/{version}/node-{version}-win-{arch}.zip", archive)
     shutil.rmtree(node_dir, ignore_errors=True)
     extract_zip(archive, node_dir)
     folders = [p for p in node_dir.iterdir() if p.is_dir() and (p / "node.exe").is_file()
@@ -290,12 +272,11 @@ def prepare_vencord(install_root: Path, plugin_source: Path):
     vencord = install_root / "Vencord"
     if not (vencord / ".git").is_dir():
         shutil.rmtree(vencord, ignore_errors=True)
-        vencord.mkdir(parents=True)
-        run(["git", "init", "--quiet"], cwd=vencord)
-        run(["git", "remote", "add", "origin", VENCORD_REPO], cwd=vencord)
-    run(["git", "fetch", "--depth", "1", "origin", VENCORD_COMMIT], cwd=vencord)
-    run(["git", "reset", "--hard", "FETCH_HEAD"], cwd=vencord)
-    run(["git", "clean", "-fdx", "--exclude=node_modules"], cwd=vencord)
+        run(["git", "clone", "--depth", "1", VENCORD_REPO, str(vencord)], cwd=install_root)
+    else:
+        run(["git", "fetch", "--depth", "1", "origin", "main"], cwd=vencord)
+        run(["git", "reset", "--hard", "origin/main"], cwd=vencord)
+        run(["git", "clean", "-fdx", "--exclude=node_modules"], cwd=vencord)
     plugin = vencord / "src" / "userplugins" / "LefferzinBypass"
     shutil.rmtree(plugin, ignore_errors=True)
     (plugin / "bin" / "win32-x64").mkdir(parents=True, exist_ok=True)

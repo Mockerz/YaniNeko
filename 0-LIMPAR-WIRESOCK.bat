@@ -44,7 +44,6 @@ sc delete wiresock-pro-client-service >nul 2>&1
 timeout /t 2 /nobreak >nul
 
 echo [4/5] Apagando perfis, login Proton, locks, logs e caches...
-rem Settings sao gravados sem BOM: o JSON.parse do Vencord rejeita BOM e zeraria tudo.
 rem Dados atuais do controlador: %%LOCALAPPDATA%%\GoLiveBypass\plugin-vpn
 if exist "%LOCALAPPDATA%\GoLiveBypass\plugin-vpn" rd /s /q "%LOCALAPPDATA%\GoLiveBypass\plugin-vpn"
 rem Possiveis dados legados em AppData Roaming ou com nome antigo
@@ -60,10 +59,10 @@ for %%F in (wireguard.conf proton-session.json wireguard-client.conf optimized-p
 )
 
 echo Limpando somente as configuracoes do LefferzinBypass no Vencord/Equicord...
-powershell -NoProfile -ExecutionPolicy Bypass -Command "$paths=@(\"$env:APPDATA\Vencord\settings\settings.json\",\"$env:APPDATA\Equicord\settings\settings.json\",\"$env:APPDATA\Vencord\settings.json\",\"$env:LOCALAPPDATA\Vencord\settings.json\",\"$env:APPDATA\Equicord\settings.json\",\"$env:LOCALAPPDATA\Equicord\settings.json\"); foreach($p in $paths){ if(Test-Path -LiteralPath $p){ try{ $j=Get-Content -LiteralPath $p -Raw | ConvertFrom-Json; if($j.plugins){ [void]$j.plugins.PSObject.Properties.Remove('LefferzinBypass'); [void]$j.plugins.PSObject.Properties.Remove('Lefferzin Bypass') }; [System.IO.File]::WriteAllText($p, ($j | ConvertTo-Json -Depth 100), (New-Object System.Text.UTF8Encoding($false))); Write-Host \"  configuracao limpa: $p\" } catch { Write-Host \"  aviso: nao consegui editar $p\" } } }"
+powershell -NoProfile -ExecutionPolicy Bypass -Command "$paths=@(\"$env:APPDATA\Vencord\settings.json\",\"$env:LOCALAPPDATA\Vencord\settings.json\",\"$env:APPDATA\Equicord\settings.json\",\"$env:LOCALAPPDATA\Equicord\settings.json\"); foreach($p in $paths){ if(Test-Path -LiteralPath $p){ try{ $j=Get-Content -LiteralPath $p -Raw | ConvertFrom-Json; if($j.plugins){ [void]$j.plugins.PSObject.Properties.Remove('LefferzinBypass'); [void]$j.plugins.PSObject.Properties.Remove('Lefferzin Bypass') }; $j | ConvertTo-Json -Depth 100 | Set-Content -LiteralPath $p -Encoding UTF8; Write-Host \"  configuracao limpa: $p\" } catch { Write-Host \"  aviso: nao consegui editar $p\" } } }"
 
 echo [5/5] Limpando DNS e verificando residuos...
-powershell -NoProfile -ExecutionPolicy Bypass -Command "Get-NetAdapter -IncludeHidden | Where-Object { $_.Name -match 'WireSock' -or $_.InterfaceDescription -match 'WireSock' } | ForEach-Object { Set-DnsClientServerAddress -InterfaceIndex $_.ifIndex -ResetServerAddresses -ErrorAction SilentlyContinue }" >nul 2>&1
+powershell -NoProfile -ExecutionPolicy Bypass -Command "Get-NetAdapter -IncludeHidden | Where-Object { `$_.Name -match 'ProTUN|WireSock' -or `$_.InterfaceDescription -match 'ProTUN|WireSock' } | ForEach-Object { Set-DnsClientServerAddress -InterfaceIndex `$_.ifIndex -ResetServerAddresses -ErrorAction SilentlyContinue }" >nul 2>&1
 ipconfig /flushdns >nul 2>&1
 
 sc query wiresock-client-service >nul 2>&1

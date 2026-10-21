@@ -11,14 +11,12 @@ function fixture() {
     const windows = { inspectWireSockAsync: async () => ({ active: false, owned: true, foreignRegisteredServices: [] }) };
     const module = { exports: {} };
     const context = {
-        module, exports: module.exports, process: { platform: "win32", pid: 123, execPath: "C:/Discord/Discord.exe", kill() {} },
+        module, exports: module.exports, process: { platform: "win32", pid: 123, kill() {} },
         require(name) {
             if (name === "electron") return { app: {} };
             if (name === "./vpn-proton") return {};
             if (name === "./vpn-windows") return windows;
             if (name === "./vpn-types") return { safeDiagnosticDetail: String };
-            // PID vivo só conta se o executável ainda for o Discord (PID reaproveitado).
-            if (name === "child_process") return { execFileSync: () => "\"Discord.exe\",\"456\",\"Console\",\"1\",\"100 K\"" };
             return require(name);
         },
         setTimeout(fn, delay) { const timer = { fn, delay, unref() {} }; timers.add(timer); return timer; },
