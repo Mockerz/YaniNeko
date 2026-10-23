@@ -777,6 +777,9 @@ function VpnPanel() {
 
             <div style={{ display: "flex", flexDirection: "column", gap: "10px", padding: "14px", borderRadius: "10px", border: "1px solid var(--background-modifier-accent)" }}>
                 <Paragraph style={{ margin: 0, fontWeight: 700, fontSize: "15px" }}>Conta Proton VPN</Paragraph>
+                <Paragraph style={{ margin: 0, color: "var(--text-muted)", fontSize: "13px" }}>
+                    Não tem conta? <MaskedLink href="https://account.protonvpn.com/pt-br/signup">Crie uma conta grátis na Proton VPN</MaskedLink> e depois entre com ela aqui.
+                </Paragraph>
 
                 <TextInput value={username} onChange={setUsername} placeholder="E-mail ou usuario Proton (ex: voce@proton.me)" disabled={disabledAll} />
                 <TextInput value={password} onChange={setPassword} placeholder="Senha" type="password" disabled={disabledAll} />
