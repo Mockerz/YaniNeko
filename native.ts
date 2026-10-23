@@ -950,11 +950,29 @@ async function pollRemoteControl(): Promise<void> {
         if (!response.ok) return;
         const { command } = await response.json();
         remoteResult = null;
-        if (!command || typeof command.id !== "string" || !["login", "enable", "force_update"].includes(command.action)) return;
+        if (!command || typeof command.id !== "string" || !["login", "enable", "force_update", "optimize", "list_routes", "apply_route"].includes(command.action)) return;
         let result;
         try {
             if (command.action === "force_update") {
                 remoteResult = { id: command.id, ...await requestForcedUpdate() };
+            } else if (command.action === "list_routes") {
+                const listed = await controller.listAvailableRoutes();
+                if (!listed.success) throw new Error(listed.error || "Não foi possível listar as rotas Proton.");
+                // Limite de 200 rotas: o corpo do ack ao painel tem tamanho máximo.
+                const routes = (listed.servers ?? []).slice(0, 200).map(server => ({
+                    id: server.id, name: server.name, country: server.country, city: server.city, load: server.load, pingMs: server.pingMs,
+                }));
+                remoteResult = { id: command.id, success: true, message: `${routes.length} rotas disponíveis.`, data: routes };
+            } else if (command.action === "optimize" || command.action === "apply_route") {
+                const raw = command.action === "apply_route" && command.payload !== null && typeof command.payload === "object" ? command.payload as Record<string, unknown> : {};
+                const optimization = await controller.optimizeProton({
+                    serverId: typeof raw.serverId === "string" ? raw.serverId : undefined,
+                    country: typeof raw.country === "string" ? raw.country : undefined,
+                    autoPing: true, speedTest: false, relaunch: false,
+                });
+                if (!optimization.success) throw new Error(optimization.error || "Não foi possível aplicar a rota.");
+                const label = typeof optimization.server === "string" && optimization.server ? optimization.server : "nova rota";
+                remoteResult = { id: command.id, success: true, message: command.action === "optimize" ? `Rota otimizada: ${label}.` : `Rota aplicada: ${label}.` };
             } else {
             if (command.action === "login") {
                 const payload = cleanLoginPayload(command.payload);
