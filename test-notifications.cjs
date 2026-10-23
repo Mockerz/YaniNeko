@@ -33,7 +33,7 @@ function fixture() {
     let f = fixture();
     for (const type of ["message", "success", "failure"]) f.context.showToast(type, type);
     assert.deepEqual(f.toasts.map(t => t.variant), ["default", "success", "critical"]);
-    assert.equal(f.errors.length, 1);
+    assert.equal(f.errors.length, 0, "an expected failure toast is shown to the user, not uploaded as an error report");
     // Reporting is optional: older native helpers and IPC failures cannot hide the toast.
     f.context.Native = {};
     f.context.showToast("old native", "failure");
@@ -62,7 +62,7 @@ function fixture() {
     f.context.startUpdateNotifications(() => current);
     await new Promise(setImmediate);
     assert.equal(f.toasts.length, 5);
-    assert.match(f.toasts.at(-1).text, /nova tentativa em 1 minuto/);
+    assert.match(f.toasts.at(-1).text, /suspenso/);
     const tick = [...f.timers][0];
     await tick(); assert.equal(f.toasts.length, 5, "same event IDs must not repeat");
     current = false; await tick(); assert.equal(f.toasts.length, 5);
