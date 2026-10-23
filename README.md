@@ -19,7 +19,7 @@ Prefere acompanhar a instalação passo a passo?
 ## Como usar
 
 1. Abra as configurações do **LefferzinBypass**.
-2. Entre com sua conta Proton VPN.
+2. Entre com sua conta Proton VPN. Não tem conta? [Crie uma grátis aqui](https://account.protonvpn.com/pt-br/signup).
 3. Informe o código de verificação (2FA), caso seja solicitado.
 4. Clique em **Logar**.
 
