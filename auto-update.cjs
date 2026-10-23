@@ -278,10 +278,15 @@ async function check(root, { force = false } = {}) {
         if (pending) return;
         // Keep the cadence across Discord restarts; an admin force-check bypasses it.
         const checked = read(path.join(base, "checked.json"));
-        const configured = read(path.join(base, "config.json"))?.updateIntervalMs;
+        const config = read(path.join(base, "config.json"));
+        const configured = config?.updateIntervalMs;
         const interval = Number.isFinite(configured) ? Math.min(MAX_INTERVAL, Math.max(MIN_INTERVAL, configured)) : DEFAULT_INTERVAL;
-        if (!force && !recovered && Number.isFinite(checked?.at) && Date.now() - checked.at < interval - 5_000) return;
-        write(path.join(base, "checked.json"), { at: Date.now(), forced: force });
+        if (config?.updateOnStartupOnly === true) {
+            // "Only when Discord starts": one check per Discord session (active.json
+            // records the running Discord PID at boot), ignoring the periodic timer.
+            if (!force && !recovered && checked?.session === state.pid) return;
+        } else if (!force && !recovered && Number.isFinite(checked?.at) && Date.now() - checked.at < interval - 5_000) return;
+        write(path.join(base, "checked.json"), { at: Date.now(), forced: force, session: state.pid ?? null });
         notify(root, "checking");
         const commit = JSON.parse(await download(`https://api.github.com/repos/${REPO}/commits/${BRANCH}`));
         const sha = commit.sha;

@@ -327,10 +327,11 @@ function syncUpdateFrequency(): void {
     if (!install) return;
     const frequency = pluginSettings().updateFrequency;
     const updateIntervalMs = frequency === "daily" ? 24 * 60 * 60 * 1000 : 3 * 60 * 60 * 1000;
-    if (install.config.updateIntervalMs === updateIntervalMs) return;
+    const updateOnStartupOnly = frequency === "startup";
+    if (install.config.updateIntervalMs === updateIntervalMs && (install.config.updateOnStartupOnly === true) === updateOnStartupOnly) return;
     try {
         const temporary = `${install.configPath}.${process.pid}.tmp`;
-        writeFileSync(temporary, JSON.stringify({ ...install.config, updateIntervalMs }, null, 2));
+        writeFileSync(temporary, JSON.stringify({ ...install.config, updateIntervalMs, updateOnStartupOnly }, null, 2));
         renameSync(temporary, install.configPath);
     } catch (error) { log("warn", "nao foi possivel salvar a frequencia de atualizacao", { erro: safeDiagnosticDetail(error, 300) }); }
 }

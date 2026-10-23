@@ -185,7 +185,7 @@ function notifyVpnStatus(status: Partial<PluginVpnStatus> | null): void {
 }
 
 let autoEnableTimer: ReturnType<typeof setInterval> | null = null;
-// Recusar o UAC pausa a religação automática até o usuário clicar em Start Bypass.
+// Recusar o UAC pausa a religação automática até o usuário clicar em Ativar bypass.
 let autoEnablePaused = false;
 
 /**
@@ -230,7 +230,7 @@ function startAutoEnable(isCurrent: () => boolean): void {
             void refreshPresenceStatus();
             if (/UAC_CANCELLED|ELEVATION_DENIED|ELEVATION_TIMEOUT/.test(error)) {
                 autoEnablePaused = true;
-                showToast("Lefferzin Bypass: o Windows não autorizou a VPN. Clique em Start Bypass para tentar de novo.", "message");
+                showToast("Lefferzin Bypass: o Windows não autorizou a VPN. Clique em Ativar bypass para tentar de novo.", "message");
             } else if (failures === 1) {
                 const routeFailed = error.includes("não passou no teste do Discord");
                 showToast(routeFailed ? `Lefferzin Bypass: ${error}` : `Lefferzin Bypass não conseguiu ativar a VPN: ${error || "rode o 0-LIMPAR-WIRESOCK.bat"}`, "message");
@@ -287,7 +287,7 @@ async function refreshPresenceStatus(): Promise<void> {
         if (!pluginRunning || generation !== pluginGeneration) return;
         notifyVpnStatus(status);
         if (status.active === true) {
-            // Vale para qualquer origem da ativação (boot, Logar, Start Bypass,
+            // Vale para qualquer origem da ativação (boot, Logar, Ativar bypass,
             // Recuperar), não só para o enable automático da inicialização.
             startAutomaticRouteMonitor();
             startPresence(status.routeId, status.routeCountry, status.routeCity, status.pingMs);
@@ -318,12 +318,12 @@ function RegionSelect({ value, placeholder, automaticLabel, onChange }: RegionSe
         { fallbackValue: [] as VoiceRegion[] }
     );
 
-    if (pending) return <Paragraph>Loading the region list.</Paragraph>;
-    if (error) return <Paragraph>Discord did not hand over the region list. Log in and reopen settings to try again.</Paragraph>;
+    if (pending) return <Paragraph>Carregando a lista de regiões...</Paragraph>;
+    if (error) return <Paragraph>O Discord não enviou a lista de regiões. Entre na sua conta e abra as configurações de novo.</Paragraph>;
 
     const options = [
         { label: automaticLabel, value: AUTOMATIC },
-        ...regions.map(region => ({ label: region.optimal ? `${region.name}, optimal for you` : region.name, value: region.id }))
+        ...regions.map(region => ({ label: region.optimal ? `${region.name} (melhor para você)` : region.name, value: region.id }))
     ];
 
     return (
@@ -342,12 +342,15 @@ function VoiceRegionPicker() {
     const { voiceRegion } = settings.use(VOICE_KEYS);
 
     return (
-        <RegionSelect
-            value={voiceRegion}
-            placeholder="Pick the region your calls should connect through"
-            automaticLabel="Automatic, whatever Discord picks"
-            onChange={region => settings.store.voiceRegion = region}
-        />
+        <section>
+            <Paragraph style={{ fontWeight: 600, marginBottom: "6px" }}>Região da chamada</Paragraph>
+            <RegionSelect
+                value={voiceRegion}
+                placeholder="Escolha a região por onde suas chamadas conectam"
+                automaticLabel="Automático (o Discord escolhe)"
+                onChange={region => settings.store.voiceRegion = region}
+            />
+        </section>
     );
 }
 
@@ -355,12 +358,15 @@ function StreamRegionPicker() {
     const { streamRegion } = settings.use(STREAM_KEYS);
 
     return (
-        <RegionSelect
-            value={streamRegion}
-            placeholder="Pick the region your screen share should go through"
-            automaticLabel="Same region as your call"
-            onChange={region => settings.store.streamRegion = region}
-        />
+        <section>
+            <Paragraph style={{ fontWeight: 600, marginBottom: "6px" }}>Região da transmissão de tela (Go Live)</Paragraph>
+            <RegionSelect
+                value={streamRegion}
+                placeholder="Escolha a região da sua transmissão de tela"
+                automaticLabel="Mesma região da chamada"
+                onChange={region => settings.store.streamRegion = region}
+            />
+        </section>
     );
 }
 
@@ -371,16 +377,18 @@ function AboutPlugin() {
 const settings = definePluginSettings({
     updateFrequency: {
         type: OptionType.SELECT,
-        description: "Frequencia de verificacao automatica de atualizacoes do plugin.",
+        displayName: "Frequência de atualização",
+        description: "Com que frequência o plugin procura atualizações.",
         options: [
-            { label: "A cada 3 horas (padrao)", value: "3h" },
-            { label: "Uma vez por dia", value: "daily" }
+            { label: "A cada 3 horas (padrão)", value: "3h" },
+            { label: "Uma vez por dia", value: "daily" },
+            { label: "Apenas ao iniciar o Discord", value: "startup" }
         ],
         default: "3h"
     },
     aboutSettings: {
         type: OptionType.COMPONENT,
-        description: "Passo a passo rapido: 1) Entrar na conta Proton  ->  2) Otimizar rota  ->  3) Start Bypass",
+        description: "Passo a passo: entre com sua conta Proton e a VPN liga sozinha.",
         component: () => null
     },
     vpnDescription: {
@@ -390,31 +398,35 @@ const settings = definePluginSettings({
     },
     protonUsername: {
         type: OptionType.STRING,
-        description: "Usuario ProtonVPN (seu login @proton.me ou o nome do app).",
+        displayName: "Usuário Proton VPN",
+        description: "Seu login da Proton VPN (e-mail ou nome de usuário).",
         default: ""
     },
     protonCountry: {
         type: OptionType.STRING,
-        description: "Paises preferidos (codigos de 2 letras, separados por virgula). Vazio = escolha automatica.",
+        displayName: "Países preferidos",
+        description: "Códigos de 2 letras separados por vírgula. Vazio = escolha automática.",
         default: "",
         placeholder: "ex.: BR,US,NL",
         isValid: (value: string) => value.trim() === "" || value.trim().split(",").every(part => /^[A-Za-z]{2}$/.test(part.trim()))
-            || "Formato errado. Use codigos de 2 letras separados por virgula: BR,US,NL"
+            || "Formato errado. Use códigos de 2 letras separados por vírgula: BR,US,NL"
     },
     protonFreeOnly: {
         type: OptionType.BOOLEAN,
+        displayName: "Somente servidores gratuitos",
         description: "Usar apenas servidores gratuitos da Proton (desligue se tiver conta Plus/Unlimited).",
         default: true
     },
     protonAutoPing: {
         type: OptionType.BOOLEAN,
-        description: "Priorizar servidores com menor latencia (mais rapido, melhor qualidade de stream).",
+        displayName: "Priorizar menor ping",
+        description: "Preferir servidores com menor latência (mais rápido, melhor qualidade de transmissão).",
         default: true
     },
     separadorVoz: {
         type: OptionType.COMPONENT,
-        description: "Configuracoes de voz e Go Live (regioes dos servidores)",
-        component: () => null
+        description: "Configurações de voz e Go Live (regiões dos servidores)",
+        component: () => <Paragraph style={{ fontWeight: 700, fontSize: "15px", marginTop: "8px" }}>Voz e Go Live</Paragraph>
     },
     voiceRegion: {
         type: OptionType.COMPONENT,
@@ -543,7 +555,7 @@ function VpnPanel() {
                 const enabled = await Native.enable(false);
                 if (enabled.success === false) {
                     reportAction(
-                        `Logado, mas bypass ainda nao ativado: ${enabled.error || enabled.message || "clique em Start Bypass"}`,
+                        `Logado, mas o bypass ainda não foi ativado: ${enabled.error || enabled.message || "clique em Ativar bypass"}`,
                         "message"
                     );
                 } else {
@@ -642,7 +654,7 @@ function VpnPanel() {
             reportAction("Bypass ativado - VPN em tunel isolado.", "success");
             await refresh();
         } catch (error) {
-            reportAction(`Start Bypass: ${error instanceof Error ? error.message : String(error)}`, "failure");
+            reportAction(`Ativar bypass: ${error instanceof Error ? error.message : String(error)}`, "failure");
         } finally {
             setStarting(false);
             setBusy(false);
@@ -761,8 +773,7 @@ function VpnPanel() {
         <section style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
             <div>
                 <Paragraph>Suporte</Paragraph>
-                <MaskedLink href="https://discord.gg/WX8AnmAp44" style={{ display: "inline-block", background: "#238636", color: "#fff", padding: "10px 16px", borderRadius: "8px", fontWeight: 700 }}>Entrar no servidor de suporte</MaskedLink>
-                <Paragraph style={{ color: "var(--text-muted)", fontSize: "12px" }}>A atividade pode ficar oculta pelas suas configurações de privacidade do Discord. Isso não desliga a VPN nem altera o contador de usuários.</Paragraph>
+                <MaskedLink href="https://discord.gg/WX8AnmAp44" style={{ display: "inline-block", marginTop: "10px", background: "#238636", color: "#fff", padding: "10px 16px", borderRadius: "8px", fontWeight: 700 }}>Entrar no servidor de suporte</MaskedLink>
             </div>
             <Paragraph style={{ margin: 0, padding: "10px 12px", borderRadius: "8px", background: statusBg, color: statusColor, fontSize: "14px", fontWeight: 600 }}>
                 <strong>Status:</strong> {statusLabel}
@@ -798,7 +809,7 @@ function VpnPanel() {
             <div style={{ display: "flex", flexDirection: "column", gap: "10px", padding: "14px", borderRadius: "10px", border: "1px solid var(--background-modifier-accent)" }}>
                 <Paragraph style={{ margin: 0, fontWeight: 700, fontSize: "15px" }}>Bypass</Paragraph>
                 <Paragraph style={{ margin: 0, color: "var(--text-muted)", fontSize: "13px" }}>
-                    O login Proton ativa o bypass automaticamente. Use Start Bypass apenas para tentar novamente se a ativação falhar.
+                    O login Proton ativa o bypass automaticamente. Use Ativar bypass apenas para tentar novamente se a ativação falhar.
                 </Paragraph>
 
                 <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
@@ -809,10 +820,10 @@ function VpnPanel() {
                         {!Native
                             ? "Reabra o Discord"
                             : status?.active === true
-                                ? "Bypass ja ativo"
+                                ? "Bypass já ativo"
                                 : starting
                                     ? "Subindo tunel..."
-                                    : "Start Bypass"}
+                                    : "Ativar bypass"}
                     </Button>
                     <Button onClick={() => void recoverAndStart()} disabled={disabledAll || !Native || !username.trim()} look={Button.Looks.OUTLINED ?? undefined}>
                         {starting ? "Recuperando..." : "Recuperar e ativar"}

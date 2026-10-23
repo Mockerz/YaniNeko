@@ -49,7 +49,7 @@ Verifique seu usuário, senha e código de autenticação.
 
 **O bypass não está funcionando.**
 
-Abra as configurações do plugin e clique em **Start Bypass**.
+Abra as configurações do plugin e clique em **Ativar bypass**.
 
 **A conexão está lenta ou com ping alto.**
 

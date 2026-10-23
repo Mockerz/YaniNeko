@@ -321,7 +321,7 @@ export class PluginVpnController {
             await this.initialize();
             // Na abertura do Discord, não repita UAC + túnel morto para um perfil
             // que já provou não passar tráfego. Otimizar/trocar rota gera um
-            // perfil novo e libera a ativação; o botão Start Bypass sempre tenta.
+            // perfil novo e libera a ativação; o botão Ativar bypass sempre tenta.
             if (automatic && this.state !== "active" && this.routeKnownBroken() && Date.now() < this.routeRetryAt) {
                 return { success: false, state: this.state, error: ROUTE_FAILURE_MESSAGE };
             }
