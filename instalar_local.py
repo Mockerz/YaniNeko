@@ -191,8 +191,12 @@ def main(argv=None) -> int:
             git = shutil.which("git")
             if not git:
                 raise RuntimeError("Instale o Git ou informe --vencord-dir com uma cópia existente.")
-            vencord.parent.mkdir(parents=True, exist_ok=True)
-            run([git, "clone", "--depth", "1", "https://github.com/Vendicated/Vencord.git", str(vencord)], vencord.parent)
+            # Mesmo commit fixado pelo instalador principal (instalar_yanineko.py).
+            vencord.mkdir(parents=True)
+            run([git, "init", "--quiet"], vencord)
+            run([git, "remote", "add", "origin", "https://github.com/Vendicated/Vencord.git"], vencord)
+            run([git, "fetch", "--depth", "1", "origin", "b0e636df2ed5c9006b80ddc6644bc41110404bc3"], vencord)
+            run([git, "reset", "--hard", "FETCH_HEAD"], vencord)
         for name in ("package.json", "scripts/build/build.mjs", "scripts/suppressExperimentalWarnings.js"):
             if not (vencord / name).is_file():
                 raise RuntimeError(f"Cópia do Vencord incompleta: {vencord / name}")

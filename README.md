@@ -22,12 +22,12 @@ Prefere acompanhar a instalação passo a passo?
 2. Entre com sua conta Proton VPN.
 3. Informe o código de verificação (2FA), caso seja solicitado.
 4. Clique em **Logar**.
-5. Utilize **Otimizar rotas** para encontrar uma conexão adequada.
-6. Aguarde o Discord reiniciar automaticamente.
 
-**Pronto!** O Discord estará utilizando a rota VPN configurada.
+**Pronto!** A VPN liga sozinha em alguns segundos.
 
-A otimização não precisa ser repetida a cada inicialização. Utilize novamente apenas quando desejar melhorar ou trocar sua conexão.
+O plugin testa cada rota antes de colocar o Discord nela e, se uma rota não funcionar, troca sozinho por outra. Se nenhuma funcionar no momento, o Discord continua normal sem VPN e o plugin tenta de novo mais tarde.
+
+**Otimizar rotas** é opcional: use apenas se quiser procurar uma conexão mais rápida.
 
 ## Atualizações automáticas
 

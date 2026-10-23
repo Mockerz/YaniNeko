@@ -30,7 +30,6 @@ const Native = VencordNative?.pluginHelpers?.LefferzinBypass as PluginNative<typ
 const logger = new Logger("Lefferzin Bypass");
 
 function showToast(message: string, type: "message" | "success" | "failure" = "message"): void {
-    if (type === "failure") reportError(message);
     try {
         discordShowToast({ text: message, variant: type === "failure" ? "critical" : type === "success" ? "success" : "default" });
     } catch (error) {
@@ -185,6 +184,65 @@ function notifyVpnStatus(status: Partial<PluginVpnStatus> | null): void {
     }
 }
 
+let autoEnableTimer: ReturnType<typeof setInterval> | null = null;
+// Recusar o UAC pausa a religação automática até o usuário clicar em Start Bypass.
+let autoEnablePaused = false;
+
+/**
+ * Religa a VPN quando ela fica inativa por 3s com uma conta Proton salva
+ * (abertura do Discord, depois de atualização, queda do serviço). Cada falha
+ * dobra a espera (15s até 5 min) para não abrir UAC em sequência; rota já
+ * reprovada é recusada pelo processo principal sem pedir UAC.
+ */
+function startAutoEnable(isCurrent: () => boolean): void {
+    if (autoEnableTimer) clearInterval(autoEnableTimer);
+    autoEnablePaused = false;
+    let inactiveSince = 0, nextAttempt = 0, failures = 0, busy = false;
+    autoEnableTimer = setInterval(async () => {
+        if (!Native || busy || autoEnablePaused || !isCurrent()) return;
+        busy = true;
+        try {
+            const status = await Native.getVpnStatus() as PluginVpnStatus;
+            if (!isCurrent()) return;
+            if (status.active || status.state !== "inactive") {
+                inactiveSince = 0;
+                if (status.active) failures = 0;
+                return;
+            }
+            const now = Date.now();
+            inactiveSince ||= now;
+            if (now - inactiveSince < 3_000 || now < nextAttempt) return;
+            const saved = await Native.getProtonSettings() as { protonUsername?: unknown; sessionUsername?: unknown };
+            const hasAccount = [saved?.protonUsername, saved?.sessionUsername].some(value => typeof value === "string" && value.trim() !== "");
+            if (!hasAccount || !isCurrent()) return;
+            const result = await Native.enable(false, true);
+            if (!isCurrent()) return;
+            if (result?.success === true) {
+                failures = 0;
+                inactiveSince = 0;
+                startAutomaticRouteMonitor();
+                void refreshPresenceStatus();
+                return;
+            }
+            failures++;
+            nextAttempt = Date.now() + Math.min(5 * 60_000, 15_000 * 2 ** (failures - 1));
+            const error = String(result?.error || result?.message || "");
+            void refreshPresenceStatus();
+            if (/UAC_CANCELLED|ELEVATION_DENIED|ELEVATION_TIMEOUT/.test(error)) {
+                autoEnablePaused = true;
+                showToast("Lefferzin Bypass: o Windows não autorizou a VPN. Clique em Start Bypass para tentar de novo.", "message");
+            } else if (failures === 1) {
+                const routeFailed = error.includes("não passou no teste do Discord");
+                showToast(routeFailed ? `Lefferzin Bypass: ${error}` : `Lefferzin Bypass não conseguiu ativar a VPN: ${error || "rode o 0-LIMPAR-WIRESOCK.bat"}`, "message");
+            }
+        } catch (error) {
+            if (isCurrent()) recordError("Falha na religação automática da VPN", error);
+        } finally {
+            busy = false;
+        }
+    }, 2_000);
+}
+
 async function checkRouteAutomatically(): Promise<void> {
     if (!Native || !pluginRunning) return;
     const generation = pluginGeneration;
@@ -196,9 +254,9 @@ async function checkRouteAutomatically(): Promise<void> {
             const load = typeof result.currentLoad === "number" ? ` (carga anterior: ${result.currentLoad}%)` : "";
             showToast(`Rota limpa ativada: ${selected}${load}. Discord continua conectado.`, "success");
             await refreshPresenceStatus();
-        } else if (result?.checked === true && typeof result.currentLoad === "number" && result.currentLoad > 70) {
+        } else if (result?.checked === true && typeof result.currentLoad === "number" && result.currentLoad > 90) {
             const candidates = typeof result.pingCandidates === "number" ? ` Foram comparadas ${result.pingCandidates} rotas de menor carga.` : "";
-            showToast(`Rota atual acima de 70% (${Math.round(result.currentLoad)}%). Não foi possível trocar a rota.${candidates}`, "message");
+            showToast(`Rota atual acima de 90% (${Math.round(result.currentLoad)}%). Não foi possível trocar a rota.${candidates}`, "message");
         }
     } catch (error) {
         if (!pluginRunning || generation !== pluginGeneration) return;
@@ -229,6 +287,9 @@ async function refreshPresenceStatus(): Promise<void> {
         if (!pluginRunning || generation !== pluginGeneration) return;
         notifyVpnStatus(status);
         if (status.active === true) {
+            // Vale para qualquer origem da ativação (boot, Logar, Start Bypass,
+            // Recuperar), não só para o enable automático da inicialização.
+            startAutomaticRouteMonitor();
             startPresence(status.routeId, status.routeCountry, status.routeCity, status.pingMs);
             updateRouteInfo(status.routeId, status.routeCountry, status.routeCity, status.pingMs);
         } else {
@@ -370,6 +431,10 @@ const settings = definePluginSettings({
 interface PluginVpnStatus {
     state: string;
     active: boolean;
+    owned?: boolean;
+    generation?: number;
+    profilePath?: string | null;
+    configPath?: string | null;
     message: string;
     externalReason: string | null;
     lastDiagnostic: { detail: string; ok: boolean; kind: string } | null;
@@ -462,6 +527,7 @@ function VpnPanel() {
     }, [status?.routeId, status?.routeCountry, status?.routeCity, status?.pingMs]);
 
     const login = async () => {
+        autoEnablePaused = false;
         if (!requireNative() || !Native || busy || optimizing || starting || logoutBusy) return;
         setBusy(true);
         try {
@@ -559,6 +625,7 @@ function VpnPanel() {
     };
 
     const startBypass = async () => {
+        autoEnablePaused = false;
         if (!requireNative() || !Native || busy || optimizing || starting || logoutBusy || loadingRoutes || applyingRoute) return;
         setStarting(true);
         setBusy(true);
@@ -583,6 +650,7 @@ function VpnPanel() {
     };
 
     const recoverAndStart = async () => {
+        autoEnablePaused = false;
         if (!requireNative() || !Native || busy || optimizing || starting || logoutBusy || loadingRoutes || applyingRoute) return;
         setStarting(true);
         setBusy(true);
@@ -664,7 +732,7 @@ function VpnPanel() {
         if (!hasConfig && !hasUser) {
             statusLabel = "Aguardando login Proton";
         } else if (!hasConfig && hasUser) {
-            statusLabel = "Logado — clique em Otimizar rotas para gerar o tunel";
+            statusLabel = "Logado — a VPN escolhe e liga uma rota sozinha em alguns segundos";
         } else if (status?.message) {
             statusLabel = status.message;
         }
@@ -1164,28 +1232,7 @@ export default definePlugin({
         startOnlineCounter(isCurrent);
         void refreshPresenceStatus();
         presenceStatusTimer = setInterval(() => void refreshPresenceStatus(), 15_000);
-        void Native.getProtonSettings().then(settings => {
-            if (!isCurrent()) return;
-            const hasUsername = typeof settings?.protonUsername === "string" && settings.protonUsername.trim() !== "";
-            const hasSession = typeof (settings as { sessionUsername?: unknown })?.sessionUsername === "string"
-                && (settings as { sessionUsername: string }).sessionUsername.trim() !== "";
-            if (!hasUsername && !hasSession) return;
-            void Native.enable(false).then(result => {
-                if (!isCurrent()) return;
-                if (result?.success === true) {
-                    startAutomaticRouteMonitor();
-                    void refreshPresenceStatus();
-                } else {
-                    void refreshPresenceStatus();
-                    showToast(`Lefferzin Bypass não conseguiu ativar a VPN: ${result?.error || result?.message || "rode o 0-LIMPAR-WIRESOCK.bat"}`, "failure");
-                }
-            }).catch(error => {
-                if (!isCurrent()) return;
-                recordError("Não conseguiu falar com o processo desktop", error);
-            });
-        }).catch(error => {
-            if (isCurrent()) recordError("Falha ao ler configurações na inicialização", error);
-        });
+        startAutoEnable(isCurrent);
     },
 
     stop() {
@@ -1201,6 +1248,8 @@ export default definePlugin({
             presenceStatusTimer = null;
         }
         stopAutomaticRouteMonitor();
+        if (autoEnableTimer) clearInterval(autoEnableTimer);
+        autoEnableTimer = null;
         stopPresence();
         stopStreamClaimWatch();
         restoreRegion();
