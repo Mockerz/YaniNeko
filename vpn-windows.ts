@@ -560,7 +560,7 @@ function runElevatedPowerShell(script: string, timeoutMs: number): Promise<strin
                     return;
                 }
                 if (codeText === "1223") {
-                    fail("UAC_CANCELLED", "O Windows cancelou a solicitação de administrador (1223). Tente novamente pelo botão Start Bypass e autorize a janela do Windows.");
+                    fail("UAC_CANCELLED", "O Windows cancelou a solicitação de administrador (1223). Tente novamente pelo botão Ativar bypass e autorize a janela do Windows.");
                     return;
                 }
                 if (codeText === "5") { fail("ELEVATION_DENIED", "O Windows negou a solicitação de administrador (5)."); return; }
