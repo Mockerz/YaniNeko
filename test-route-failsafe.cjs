@@ -195,6 +195,59 @@ test("a new route that fails during manual optimization rolls back to the workin
     } finally { fs.rmSync(dataDir, { recursive: true, force: true }); }
 });
 
+test("route dying mid-session is detected by the periodic health check", async () => {
+    const f = fixture([{ success: false, error: "nenhuma familia" }]);
+    try {
+        const verified = [];
+        f.c.verifyAdoptedRoute = stage => verified.push(stage);
+        f.c.checkRouteHealth();
+        await new Promise(setImmediate); await new Promise(setImmediate);
+        assert.deepEqual(verified, ["watchdog"], "a probe without Discord starts the confirm + failover path");
+        f.c.checkRouteHealth();
+        await new Promise(setImmediate);
+        assert.deepEqual(verified, ["watchdog"], "health check is rate limited");
+    } finally { f.cleanup(); }
+});
+
+test("healthy route or unreadable probe output never triggers a swap", async () => {
+    for (const probe of [{ success: true, discordOk: true }, null]) {
+        const f = fixture([probe]);
+        try {
+            const verified = [];
+            f.c.verifyAdoptedRoute = stage => verified.push(stage);
+            f.c.checkRouteHealth();
+            await new Promise(setImmediate); await new Promise(setImmediate);
+            assert.deepEqual(verified, []);
+        } finally { f.cleanup(); }
+    }
+});
+
+test("optimize without a chosen server replaces a quarantined ping pick with a plugin-chosen route", async () => {
+    const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), "route-optimize-"));
+    try {
+        const requests = [];
+        const Controller = load({ proton: {
+            isOptimizationRouteAllowed: () => true,
+            listAvailableServers: async () => ({ success: true, servers: [
+                { id: "US-FREE#138", name: "US-FREE#138", country: "US", city: "New York", score: 1 },
+                { id: "US-FREE#131", name: "US-FREE#131", country: "US", city: "Secaucus", score: 2 },
+            ] }),
+            generateOptimalProtonConfig: async (_dir, options) => {
+                requests.push(options.serverId ?? "auto-ping");
+                if (!options.serverId) return { success: false, error: "A rota escolhida pelo Proton está em quarentena (sem acesso ao Discord)." };
+                return { success: true, server: options.serverId, country: "US" };
+            },
+        } });
+        const c = new Controller({ dataDir, guiDataDir: dataDir, isEnabled: () => true, readSettings: () => ({ protonUsername: "user" }), log() {} });
+        Object.assign(c, { routeId: "US-FREE#138", routeCountry: "US", routeCity: "New York" });
+        c.quarantineCurrentRoute();
+        c.getStatus = async () => ({ active: false });
+        const result = await c.optimizeProton({ autoPing: true, speedTest: false, relaunch: false });
+        assert.equal(result.success, true);
+        assert.deepEqual(requests, ["auto-ping", "US-FREE#131"], "falls back to a non-quarantined server instead of failing");
+    } finally { fs.rmSync(dataDir, { recursive: true, force: true }); }
+});
+
 (async () => {
     for (const [name, fn] of tests) {
         try { await fn(); }

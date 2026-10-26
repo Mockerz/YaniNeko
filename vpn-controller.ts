@@ -62,6 +62,9 @@ const ROUTE_FAILOVER_ATTEMPTS = 3;
 const ROUTE_RETRY_MS = 30 * 60_000;
 // Rota testada recentemente sobe direto, sem a fase de teste isolada.
 const ROUTE_VERIFIED_MS = 12 * 60 * 60_000;
+// Durante o uso a rota é testada de novo a cada minuto: servidores free caem
+// no meio da sessão e o Discord ficaria preso num túnel morto.
+const ROUTE_HEALTH_MS = 60_000;
 const AUTO_ROUTE_PING_CANDIDATES = 20;
 
 function errorMessage(error: unknown): string {
@@ -147,6 +150,8 @@ export class PluginVpnController {
     private optimizationPending = false;
     private routeRetryAt = 0;
     private lastInspection: windows.WireSockInspection | null = null;
+    private lastRouteHealthAt = 0;
+    private routeHealthBusy = false;
     private routeId: string | null = null;
     private routeCountry: string | null = null;
     private routeCity: string | null = null;
@@ -639,6 +644,23 @@ export class PluginVpnController {
                         onProgress: progress => options.onProgress?.({ ...progress, requestId: id }),
                         log: this.options.log,
                     });
+                    if (!result.success && !options.serverId && !options.speedTest && /quarentena/i.test(result.error || "")) {
+                        // O confgen escolheu por ping uma rota em quarentena (ex.: datacenter
+                        // caído): troca por um servidor escolhido pelo plugin.
+                        const { candidate } = await this.pickRouteCandidate(username, settings, "");
+                        if (candidate) {
+                            this.options.log("info", "otimização: rota por ping estava em quarentena; usando outra", { rota: candidate.name });
+                            result = await proton.generateOptimalProtonConfig(this.dataDir, {
+                                username,
+                                serverId: candidate.name,
+                                freeOnly: options.freeOnly ?? settings.protonFreeOnly,
+                                autoPing: false,
+                                skip: server => this.routeQuarantined(server),
+                                signal: controller.signal,
+                                log: this.options.log,
+                            });
+                        }
+                    }
                 } catch (error) {
                     const restoreError = await restorePreviousRoute();
                     if (restoreError) this.options.log("error", "otimização falhou e a rota anterior não voltou", { erro: restoreError });
@@ -969,6 +991,7 @@ export class PluginVpnController {
                         country: settings.protonCountry,
                         freeOnly: settings.protonFreeOnly,
                         autoPing: settings.protonAutoPing,
+                        skip: server => this.routeQuarantined(server),
                         log: this.options.log,
                     });
                 }
@@ -1183,25 +1206,13 @@ export class PluginVpnController {
         // funcionar e mantém o ping. Dois servidores reprovados na mesma
         // cidade tiram a cidade inteira (quarentena), e aí outros países entram.
         const preferredCountry = (this.routeCountry || "").toUpperCase();
-        for (let attempt = 1; attempt <= ROUTE_FAILOVER_ATTEMPTS && !result.success && routeTestFailed(result.error); attempt++) {
+        for (let attempt = 1; attempt <= ROUTE_FAILOVER_ATTEMPTS && !result.success && (routeTestFailed(result.error) || /quarentena/i.test(result.error || "")); attempt++) {
             const settings = this.settings();
             const username = normalizeUsername(settings.protonUsername);
             if (!username) break;
-            // O proton-confgen ignora -exclude-servers na seleção automática,
-            // então o plugin escolhe o servidor e o pede explicitamente.
-            const listed = await proton.listAvailableServers(this.dataDir, {
-                username,
-                countries: settings.protonCountry || undefined,
-                freeOnly: settings.protonFreeOnly,
-                p2pOnly: true,
-                log: this.options.log,
-            });
-            const sameCountry = (server: proton.ProtonServerEntry) => (preferredCountry && server.country.toUpperCase() === preferredCountry ? 0 : 1);
-            const candidate = (listed.servers ?? [])
-                .filter(server => proton.isOptimizationRouteAllowed(server) && !this.routeQuarantined(server))
-                .sort((a, b) => sameCountry(a) - sameCountry(b) || (a.score ?? 99) - (b.score ?? 99) || (a.load ?? 100) - (b.load ?? 100))[0];
+            const { candidate, error: listError } = await this.pickRouteCandidate(username, settings, preferredCountry);
             if (!candidate) {
-                this.options.log("warn", "failover sem rota candidata", { erro: listed.error });
+                this.options.log("warn", "failover sem rota candidata", { erro: listError });
                 break;
             }
             this.options.log("warn", "rota sem acesso ao Discord; trocando de rota automaticamente", { tentativa: attempt, rotaAnterior: this.routeId, novaRota: candidate.name });
@@ -1227,6 +1238,42 @@ export class PluginVpnController {
             this.options.log("warn", "nenhuma rota alcançou o Discord; seguindo sem VPN e tentando de novo mais tarde", { minutos: ROUTE_RETRY_MS / 60_000 });
         }
         return result;
+    }
+
+    /**
+     * O proton-confgen ignora -exclude-servers na seleção automática, então o
+     * plugin escolhe o servidor e o pede explicitamente: sem quarentena, dentro
+     * dos limites de país/carga, preferindo o país indicado (mantém o ping).
+     */
+    private async pickRouteCandidate(username: string, settings: VpnSettings, preferredCountry: string): Promise<{ candidate?: proton.ProtonServerEntry; error?: string }> {
+        const listed = await proton.listAvailableServers(this.dataDir, {
+            username,
+            countries: settings.protonCountry || undefined,
+            freeOnly: settings.protonFreeOnly,
+            p2pOnly: true,
+            log: this.options.log,
+        });
+        const preferred = preferredCountry.toUpperCase();
+        const sameCountry = (server: proton.ProtonServerEntry) => (preferred && server.country.toUpperCase() === preferred ? 0 : 1);
+        const candidate = (listed.servers ?? [])
+            .filter(server => proton.isOptimizationRouteAllowed(server) && !this.routeQuarantined(server))
+            .sort((a, b) => sameCountry(a) - sameCountry(b) || (a.score ?? 99) - (b.score ?? 99) || (a.load ?? 100) - (b.load ?? 100))[0];
+        return { candidate, error: listed.error };
+    }
+
+    private checkRouteHealth(): void {
+        if (this.routeHealthBusy || Date.now() - this.lastRouteHealthAt < ROUTE_HEALTH_MS) return;
+        const probePath = this.readOwner()?.probePath;
+        if (!probePath || !fs.existsSync(probePath)) return;
+        this.routeHealthBusy = true;
+        this.lastRouteHealthAt = Date.now();
+        const generation = this.generation;
+        void windows.runRouteProbe(probePath).then(result => {
+            // Saída ilegível não é prova; só uma resposta explícita sem Discord é.
+            if (!result || probeShowsTunnel(result) || this.state !== "active" || generation !== this.generation) return;
+            this.options.log("warn", "rota parou de alcançar o Discord durante o uso; confirmando antes de trocar");
+            this.verifyAdoptedRoute("watchdog");
+        }).catch(() => { /* o próximo ciclo tenta de novo */ }).finally(() => { this.routeHealthBusy = false; });
     }
 
     private routeFailurePath(): string {
@@ -1382,6 +1429,7 @@ export class PluginVpnController {
                     return;
                 }
                 this.startDiagnostics("watchdog");
+                this.checkRouteHealth();
             } catch (error) {
                 this.options.log("warn", "falha na consulta assíncrona do watchdog", { erro: errorMessage(error) });
             } finally {
