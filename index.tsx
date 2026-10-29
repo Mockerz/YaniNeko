@@ -23,7 +23,7 @@ import {
     type StreamObservation,
     type StreamObservationStatus,
 } from "./stability";
-import { startPresence, stopPresence, updateRouteInfo, updateOnlineUsers } from "./presence";
+import { setPresenceEnabled, startPresence, stopPresence, updateRouteInfo, updateOnlineUsers } from "./presence";
 
 const Native = VencordNative?.pluginHelpers?.LefferzinBypass as PluginNative<typeof import("./native")> | undefined;
 
@@ -437,6 +437,13 @@ const settings = definePluginSettings({
         type: OptionType.COMPONENT,
         component: StreamRegionPicker,
         default: AUTOMATIC
+    },
+    showActivity: {
+        type: OptionType.BOOLEAN,
+        displayName: "Mostrar atividade no perfil",
+        description: "Desligue para esconder a atividade do LefferzinBypass do seu perfil. O bypass continua funcionando normalmente.",
+        default: true,
+        onChange: (value: boolean) => setPresenceEnabled(value)
     }
 });
 
@@ -1236,6 +1243,7 @@ export default definePlugin({
     start() {
         lastVpnNotification = null;
         syncReportUsername();
+        setPresenceEnabled(settings.store.showActivity !== false);
         pluginRunning = true;
         const generation = ++pluginGeneration;
         const isCurrent = () => pluginRunning && generation === pluginGeneration;
