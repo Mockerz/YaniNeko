@@ -25,6 +25,7 @@ let currentCountry: string | null = null;
 let currentCity: string | null = null;
 let currentPing: number | null = null;
 let presenceGeneration = 0;
+let presenceEnabled = true;
 let onlineUsers: number | null = null;
 let onlineUsersUpdatedAt = 0;
 
@@ -112,13 +113,24 @@ function dispatch(activity: Activity | null) {
     }
 }
 
+export function setPresenceEnabled(value: boolean): void {
+    presenceEnabled = value;
+    if (!value) {
+        presenceGeneration++;
+        if (lastActivitySnapshot) dispatch(null);
+        lastActivitySnapshot = null;
+    } else if (active) {
+        void publishActivity();
+    }
+}
+
 async function publishActivity() {
-    if (!active) return;
+    if (!active || !presenceEnabled) return;
     const generation = presenceGeneration;
     const activity = await buildActivity();
     // A resolução do asset é assíncrona. O plugin pode ter sido parado
     // enquanto aguardávamos a rede; nesse caso não republique a presença.
-    if (!active || generation !== presenceGeneration) return;
+    if (!active || !presenceEnabled || generation !== presenceGeneration) return;
     dispatch(activity);
 }
 
