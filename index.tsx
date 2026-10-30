@@ -6,13 +6,14 @@
 
 import { sendBotMessage } from "@api/Commands";
 import { definePluginSettings } from "@api/Settings";
+import { Button } from "@components/Button";
 import { Paragraph } from "@components/Paragraph";
 import { copyWithToast } from "@utils/discord";
 import { Logger } from "@utils/Logger";
 import { useAwaiter } from "@utils/react";
 import definePlugin, { OptionType, PluginNative } from "@utils/types";
 import { findStoreLazy } from "@webpack";
-import { Button, Constants, MaskedLink, React, RestAPI, SearchableSelect, TextInput, showToast as discordShowToast, UserStore, useEffect, useState } from "@webpack/common";
+import { Constants, MaskedLink, React, RestAPI, SearchableSelect, TextInput, showToast as discordShowToast, UserStore, useEffect, useState } from "@webpack/common";
 
 import {
     evaluateStreamObservation,
@@ -804,10 +805,10 @@ function VpnPanel() {
                 <TextInput value={twoFactorCode} onChange={setTwoFactorCode} placeholder="Codigo 2FA (deixa em branco se nao usar)" disabled={disabledAll} />
 
                 <div style={{ display: "flex", gap: "8px", flexWrap: "wrap", marginTop: "4px" }}>
-                    <Button onClick={() => void login()} disabled={disabledAll || !username.trim()} look={Button.Looks.FILLED ?? undefined}>
+                    <Button onClick={() => void login()} disabled={disabledAll || !username.trim()} variant="primary">
                         {busy ? "Entrando..." : "Logar"}
                     </Button>{" "}
-                    <Button onClick={() => void logout()} disabled={disabledAll} look={Button.Looks.LINK ?? undefined}>
+                    <Button onClick={() => void logout()} disabled={disabledAll} variant="secondary">
                         {logoutBusy ? "Saindo..." : "Sair"}
                     </Button>
                 </div>
@@ -820,10 +821,10 @@ function VpnPanel() {
                 </Paragraph>
 
                 <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
-                    <Button onClick={() => void optimize()} disabled={disabledAll || !username.trim()} look={Button.Looks.OUTLINED ?? undefined}>
+                    <Button onClick={() => void optimize()} disabled={disabledAll || !username.trim()} variant="secondary">
                         {optimizing ? "Otimizando rotas..." : "Otimizar rotas"}
                     </Button>{" "}
-                    <Button onClick={() => void startBypass()} disabled={disabledAll || status?.active === true || !Native} look={Button.Looks.FILLED ?? undefined}>
+                    <Button onClick={() => void startBypass()} disabled={disabledAll || status?.active === true || !Native} variant="primary">
                         {!Native
                             ? "Reabra o Discord"
                             : status?.active === true
@@ -832,7 +833,7 @@ function VpnPanel() {
                                     ? "Subindo tunel..."
                                     : "Ativar bypass"}
                     </Button>
-                    <Button onClick={() => void recoverAndStart()} disabled={disabledAll || !Native || !username.trim()} look={Button.Looks.OUTLINED ?? undefined}>
+                    <Button onClick={() => void recoverAndStart()} disabled={disabledAll || !Native || !username.trim()} variant="secondary">
                         {starting ? "Recuperando..." : "Recuperar e ativar"}
                     </Button>
                 </div>
@@ -855,10 +856,10 @@ function VpnPanel() {
                     />
 
                     <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
-                        <Button onClick={() => void loadRoutes()} disabled={disabledAll} look={Button.Looks.OUTLINED ?? undefined}>
+                        <Button onClick={() => void loadRoutes()} disabled={disabledAll} variant="secondary">
                             {loadingRoutes ? "Atualizando..." : "Atualizar rotas"}
                         </Button>{" "}
-                        <Button onClick={() => void applyRoute()} disabled={disabledAll || !selectedRouteId || routes.length === 0} look={Button.Looks.FILLED ?? undefined}>
+                        <Button onClick={() => void applyRoute()} disabled={disabledAll || !selectedRouteId || routes.length === 0} variant="primary">
                             {applyingRoute ? "Aplicando..." : "Aplicar rota"}
                         </Button>
                     </div>
