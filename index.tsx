@@ -1186,7 +1186,7 @@ async function buildReport() {
 export default definePlugin({
     name: "LefferzinBypass",
     enabledByDefault: true,
-    description: "Devolve o Go Live e a câmera para contas bloqueadas, com VPN WireGuard isolada só para este Discord.",
+    description: "Libera a transmissão de tela e a câmera em contas bloqueadas usando uma VPN da Proton só para o Discord, sem mexer na internet do resto do PC.",
     authors: [{ name: "L3ffer_", id: 406595579603451914n }],
     tags: ["Voz", "Privacidade"],
     settings,
