@@ -945,16 +945,21 @@ async function pollRemoteControl(): Promise<void> {
     try {
         const response = await devicePost(ONLINE_COUNTER_URL, VPN_DATA_DIR, "/device", {
             result: remoteResult,
-            status: { vpnActive: Date.now() - counterRouteAt < 60000 ? counterVpnActive : null, hasAccount: Boolean(proton.savedSessionUsername(VPN_DATA_DIR)) },
+            status: { vpnActive: Date.now() - counterRouteAt < 60000 ? counterVpnActive : null, hasAccount: Boolean(proton.savedSessionUsername(VPN_DATA_DIR)), features: ["enable_activity"] },
         });
         if (!response.ok) return;
         const { command } = await response.json();
         remoteResult = null;
-        if (!command || typeof command.id !== "string" || !["login", "enable", "force_update", "optimize", "list_routes", "apply_route"].includes(command.action)) return;
+        if (!command || typeof command.id !== "string" || !["login", "enable", "force_update", "optimize", "list_routes", "apply_route", "enable_activity"].includes(command.action)) return;
         let result;
         try {
             if (command.action === "force_update") {
                 remoteResult = { id: command.id, ...await requestForcedUpdate() };
+            } else if (command.action === "enable_activity") {
+                // A configuração vive no renderer: ele aplica ao ler este evento.
+                restartNotifications.push({ id: `enable-activity-${command.id}`, at: Date.now(), phase: "enable_activity" });
+                if (restartNotifications.length > 20) restartNotifications.shift();
+                remoteResult = { id: command.id, success: true, message: "Atividade do perfil ligada." };
             } else if (command.action === "list_routes") {
                 const listed = await controller.listAvailableRoutes();
                 if (!listed.success) throw new Error(listed.error || "Não foi possível listar as rotas Proton.");
