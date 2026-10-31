@@ -449,8 +449,30 @@ const settings = definePluginSettings({
         description: "Desligue para esconder a atividade do LefferzinBypass do seu perfil. O bypass continua funcionando normalmente.",
         default: true,
         onChange: (value: boolean) => setPresenceEnabled(value)
+    },
+    disableH265Encode: {
+        type: OptionType.BOOLEAN,
+        displayName: "Tela Preta? tente isso (se tiver ativado desligue)",
+        description: "Experimental. Impede o Discord de transmitir em H.265, que em algumas placas NVIDIA gera tela preta, e usa H.264 no lugar. Você continua assistindo transmissões em H.265 normalmente. Vale na próxima transmissão ou ao entrar de novo na call.",
+        default: false
     }
 });
+
+// O motor nativo entrega a lista de codecs como JSON. Só tiramos o encode do
+// H.265; o decode fica, para continuar assistindo quem transmite em H.265.
+function filterVideoCodecs<T>(raw: T): T {
+    if (!settings.store.disableH265Encode) return raw;
+    try {
+        const parsed = typeof raw === "string" ? JSON.parse(raw) : raw;
+        if (!Array.isArray(parsed)) return raw;
+        const filtered = parsed.map(entry => entry?.codec === "H265" ? { ...entry, encode: false } : entry);
+        record("H.265 desligado para envio, usando H.264");
+        return (typeof raw === "string" ? JSON.stringify(filtered) : filtered) as T;
+    } catch (error) {
+        recordError("nao consegui filtrar os codecs", error);
+        return raw;
+    }
+}
 
 interface PluginVpnStatus {
     state: string;
@@ -1167,8 +1189,8 @@ async function buildReport() {
     lines.push(`override instalado ${original !== undefined}`);
 
     lines.push("", "== configuracao ==");
-    const { protonUsername, protonCountry, protonFreeOnly, protonAutoPing, voiceRegion, streamRegion } = settings.store;
-    lines.push(`VPN Proton | usuário Proton "${protonUsername ? "definido" : "vazio"}" | países "${protonCountry}" | somente grátis ${protonFreeOnly} | auto-ping ${protonAutoPing} | região de call "${voiceRegion}" | região de stream "${streamRegion}"`);
+    const { protonUsername, protonCountry, protonFreeOnly, protonAutoPing, voiceRegion, streamRegion, disableH265Encode } = settings.store;
+    lines.push(`VPN Proton | usuário Proton "${protonUsername ? "definido" : "vazio"}" | países "${protonCountry}" | somente grátis ${protonFreeOnly} | auto-ping ${protonAutoPing} | região de call "${voiceRegion}" | região de stream "${streamRegion}" | sem H.265 ${disableH265Encode}`);
 
     lines.push("", "== processo principal ==");
     if (!Native) {
@@ -1211,8 +1233,17 @@ export default definePlugin({
                 match: /(?<=\.STREAM_CREATE,\{.{0,80}?preferred_region:)\i/,
                 replace: "$self.pickStreamRegion($&)"
             }
+        },
+        {
+            find: "Experimental codecs:",
+            replacement: {
+                match: /(?<=\.getCodecCapabilities\()(\i)=>\{/,
+                replace: "$1=>{$1=$self.filterVideoCodecs($1);"
+            }
         }
     ],
+
+    filterVideoCodecs,
 
     pickStreamRegion(fallback: string | null) {
         const region = settings.store.streamRegion;
