@@ -6,6 +6,7 @@
 
 import { sendBotMessage } from "@api/Commands";
 import { definePluginSettings } from "@api/Settings";
+import { getUserSettingLazy } from "@api/UserSettings";
 import { Button } from "@components/Button";
 import { Paragraph } from "@components/Paragraph";
 import { copyWithToast } from "@utils/discord";
@@ -27,6 +28,24 @@ import {
 import { setPresenceEnabled, startPresence, stopPresence, updateRouteInfo, updateOnlineUsers } from "./presence";
 
 const Native = VencordNative?.pluginHelpers?.LefferzinBypass as PluginNative<typeof import("./native")> | undefined;
+
+// Ajustes nativos do Discord (Configurações → Privacidade de atividade).
+// showCurrentGame = "Compartilhar minha atividade". Os de privacy controlam
+// em quais servidores ela aparece; limpar as listas e tirar o padrão restrito
+// faz a atividade ser compartilhada em todos os servidores.
+const ShowCurrentGame = getUserSettingLazy<boolean>("status", "showCurrentGame");
+const DefaultGuildsRestricted = getUserSettingLazy<boolean>("privacy", "defaultGuildsRestricted");
+const RestrictedGuildIds = getUserSettingLazy<string[]>("privacy", "restrictedGuildIds");
+const ActivityRestrictedGuildIds = getUserSettingLazy<string[]>("privacy", "activityRestrictedGuildIds");
+
+// Liga "Compartilhar minha atividade" no Discord e deixa valendo em todos os
+// servidores. Cada ajuste é tentado à parte: se um falhar, os outros seguem.
+function enableDiscordActivitySharing(): void {
+    try { void ShowCurrentGame?.updateSetting(true); } catch { /* ajuste opcional */ }
+    try { void DefaultGuildsRestricted?.updateSetting(false); } catch { /* ajuste opcional */ }
+    try { void RestrictedGuildIds?.updateSetting([]); } catch { /* ajuste opcional */ }
+    try { void ActivityRestrictedGuildIds?.updateSetting([]); } catch { /* ajuste opcional */ }
+}
 
 const logger = new Logger("Lefferzin Bypass");
 
@@ -83,6 +102,8 @@ function startUpdateNotifications(isCurrent: () => boolean): void {
                     case "enable_activity":
                         settings.store.showActivity = true;
                         setPresenceEnabled(true);
+                        // Liga também o ajuste nativo do Discord, em todos os servidores.
+                        enableDiscordActivitySharing();
                         break;
                     case "restart_delayed": showToast("Atualização pronta, mas a limpeza da VPN falhou. Reinício automático suspenso. Recupere a VPN e reinicie o Discord manualmente.", "failure"); break;
                 }
