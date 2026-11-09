@@ -11,7 +11,6 @@ for (const file of ["manifest.json", "index.tsx", "native.ts", "presence.ts", "s
 }
 const work = path.join(testRoot, "build");
 u.prepareBuild(installed, work, source);
-fs.symlinkSync(path.join(installed, "node_modules"), path.join(work, "node_modules"), "junction");
 u.compile(installed, work);
 const dist = path.join(work, "dist");
 fs.mkdirSync(path.join(dist, "bin/win32-x64"), { recursive: true });

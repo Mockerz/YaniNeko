@@ -246,6 +246,14 @@ function prepareBuild(root, work, source) {
     for (const name of ["src", "scripts", "packages", "package.json", "tsconfig.json"]) {
         if (fs.existsSync(path.join(root, name))) copyTree(path.join(root, name), path.join(work, name));
     }
+    // The Vencord build resolves dependencies (e.g. @vencord/monaco-editor) from the build
+    // cwd at compile time, but copyTree omits node_modules by design. Link the installed
+    // modules in instead of copying gigabytes; the junction is removed with the work tree.
+    const modules = path.join(root, "node_modules");
+    if (fs.existsSync(modules)) {
+        try { fs.symlinkSync(modules, path.join(work, "node_modules"), "junction"); }
+        catch (error) { if (error.code !== "EEXIST") throw error; }
+    }
     const plugin = inside(work, "src/userplugins/LefferzinBypass");
     fs.rmSync(plugin, { recursive: true, force: true });
     copyTree(source, plugin);
