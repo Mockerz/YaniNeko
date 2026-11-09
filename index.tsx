@@ -5,6 +5,7 @@
  */
 
 import { sendBotMessage } from "@api/Commands";
+import { showNotification } from "@api/Notifications";
 import { definePluginSettings } from "@api/Settings";
 import { getUserSettingLazy } from "@api/UserSettings";
 import { Button } from "@components/Button";
@@ -14,7 +15,7 @@ import { Logger } from "@utils/Logger";
 import { useAwaiter } from "@utils/react";
 import definePlugin, { OptionType, PluginNative } from "@utils/types";
 import { findStoreLazy } from "@webpack";
-import { Constants, MaskedLink, React, RestAPI, SearchableSelect, TextInput, showToast as discordShowToast, UserStore, useEffect, useState } from "@webpack/common";
+import { Constants, MaskedLink, React, RestAPI, SearchableSelect, TextInput, UserStore, useEffect, useState } from "@webpack/common";
 
 import {
     evaluateStreamObservation,
@@ -51,7 +52,12 @@ const logger = new Logger("Lefferzin Bypass");
 
 function showToast(message: string, type: "message" | "success" | "failure" = "message"): void {
     try {
-        discordShowToast({ text: message, variant: type === "failure" ? "critical" : type === "success" ? "success" : "default" });
+        void showNotification({
+            title: "Lefferzin Bypass",
+            body: message,
+            color: type === "failure" ? "var(--status-danger)" : type === "success" ? "var(--status-positive)" : "var(--brand-500)",
+            noPersist: true,
+        }).catch(error => recordError("Falha ao exibir notificação", error));
     } catch (error) {
         recordError("Falha ao exibir notificação", error);
     }
