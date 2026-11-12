@@ -45,6 +45,7 @@ let counterLastAttempt = 0;
 let counterValue: number | null = null;
 let counterSuccessAt = 0;
 let counterContext: [unknown, unknown] | null = null;
+let counterGeneration = 0;
 let counterRoute: { server: string | null; country: string | null; city: string | null; label: string | null } | null = null;
 let counterRouteBusy = false;
 let counterRouteAt = 0;
@@ -121,6 +122,7 @@ export async function heartbeatOnlineCounter(_: IpcMainInvokeEvent, discordUsern
     if (counterRequest) return counterRequest;
     if (Date.now() - counterLastAttempt < 25000) return counterValue;
     counterLastAttempt = Date.now();
+    const generation = counterGeneration;
     counterRequest = (async () => {
         try {
             const file = join(VPN_DATA_DIR, "online-installation-id.txt");
@@ -177,16 +179,26 @@ export async function heartbeatOnlineCounter(_: IpcMainInvokeEvent, discordUsern
                 }
             }
             if (!Number.isSafeInteger(result?.online) || result.online < 0 || result.online > 100000) throw new Error("Invalid counter");
-            counterValue = pluginEnabled() ? result.online : null;
+            if (generation !== counterGeneration || !pluginEnabled()) return null;
+            counterValue = result.online;
             counterSuccessAt = Date.now();
         } catch (error) {
             // Optional presence data must not affect the VPN or trigger support reports.
-            if (Date.now() - counterSuccessAt >= 180000) counterValue = null;
+            if (generation === counterGeneration && Date.now() - counterSuccessAt >= 180000) counterValue = null;
             log("warn", "contador: falha no heartbeat; nova tentativa em 30s", { erro: safeDiagnosticDetail(error) });
         }
         return counterValue;
     })();
     try { return await counterRequest; } finally { counterRequest = null; }
+}
+
+/** Stop heartbeats immediately when the Discord account/plugin session ends. */
+export function stopOnlineCounter(_: IpcMainInvokeEvent): void {
+    counterGeneration++;
+    counterContext = null;
+    counterValue = null;
+    counterSuccessAt = 0;
+    counterLastAttempt = 0;
 }
 
 export function getAutoUpdateNotifications(_: IpcMainInvokeEvent, since: unknown) {

@@ -176,19 +176,57 @@ let lastSelectedStreamRegion: string | null = null;
 let presenceStatusTimer: ReturnType<typeof setInterval> | null = null;
 let presenceStatusBusy = false;
 let onlineCounterTimer: ReturnType<typeof setInterval> | null = null;
+let discordGatewayConnected = false;
 
 function startOnlineCounter(isCurrent: () => boolean): void {
     if (onlineCounterTimer) clearInterval(onlineCounterTimer);
+    Native?.stopOnlineCounter?.();
     const sessionId = crypto.randomUUID();
     const poll = async () => {
-        if (!isCurrent()) return;
+        if (!isCurrent() || !discordGatewayConnected) {
+            Native?.stopOnlineCounter?.();
+            if (isCurrent()) updateOnlineUsers(null);
+            return;
+        }
+        const username = UserStore.getCurrentUser()?.username;
+        if (typeof username !== "string" || !username.trim()) {
+            Native?.stopOnlineCounter?.();
+            if (isCurrent()) updateOnlineUsers(null);
+            return;
+        }
         try {
-            const online = await Native?.heartbeatOnlineCounter?.(UserStore.getCurrentUser()?.username, sessionId);
+            const online = await Native?.heartbeatOnlineCounter?.(username, sessionId);
             if (isCurrent()) updateOnlineUsers(typeof online === "number" ? online : null);
         } catch { if (isCurrent()) updateOnlineUsers(null); }
     };
     void poll();
     onlineCounterTimer = setInterval(() => void poll(), 30000);
+}
+
+function stopOnlineCounter(): void {
+    if (onlineCounterTimer) clearInterval(onlineCounterTimer);
+    onlineCounterTimer = null;
+    Native?.stopOnlineCounter?.();
+    updateOnlineUsers(null);
+}
+
+function restartOnlineCounter(): void {
+    if (!pluginRunning || !discordGatewayConnected || !Native) return;
+    const generation = pluginGeneration;
+    startOnlineCounter(() => pluginRunning && generation === pluginGeneration && discordGatewayConnected);
+}
+
+function setDiscordGatewayConnected(value: boolean): void {
+    if (discordGatewayConnected === value) return;
+    discordGatewayConnected = value;
+    if (!value) {
+        stopOnlineCounter();
+        stopPresence();
+        updateRouteInfo(null, null, null, null);
+        return;
+    }
+    restartOnlineCounter();
+    void refreshPresenceStatus();
 }
 let pluginRunning = false;
 let pluginGeneration = 0;
@@ -312,6 +350,10 @@ function stopAutomaticRouteMonitor(): void {
 
 async function refreshPresenceStatus(): Promise<void> {
     if (!Native || !pluginRunning || presenceStatusBusy) return;
+    if (!discordGatewayConnected) {
+        stopPresence();
+        return;
+    }
     presenceStatusBusy = true;
     const generation = pluginGeneration;
     try {
@@ -328,6 +370,10 @@ async function refreshPresenceStatus(): Promise<void> {
             stopPresence();
         }
     } catch (error) {
+        if (pluginRunning && generation === pluginGeneration) {
+            stopPresence();
+            updateRouteInfo(null, null, null, null);
+        }
         if (pluginRunning && generation === pluginGeneration) recordError("Falha ao atualizar o status global do Presence", error);
     } finally {
         presenceStatusBusy = false;
@@ -588,12 +634,12 @@ function VpnPanel() {
 
     useEffect(() => {
         if (!Native) return;
-        if (status?.active === true) {
+        if (status?.active === true && discordGatewayConnected) {
             startPresence(status?.routeId, status?.routeCountry, status?.routeCity, status?.pingMs);
-        } else if (status?.state === "blocked_external" || status?.state === "recovery_required") {
+        } else if (status?.active !== true || !discordGatewayConnected || status?.state === "blocked_external" || status?.state === "recovery_required") {
             stopPresence();
         }
-    }, [status?.active, status?.state, Native, status?.routeId, status?.routeCountry, status?.routeCity, status?.pingMs]);
+    }, [status?.active, status?.state, discordGatewayConnected, Native, status?.routeId, status?.routeCountry, status?.routeCity, status?.pingMs]);
 
     useEffect(() => {
         updateRouteInfo(status?.routeId ?? null, status?.routeCountry ?? null, status?.routeCity ?? null, status?.pingMs ?? null);
@@ -790,7 +836,7 @@ function VpnPanel() {
         const routeText = status.routeLabel
             || (status.routeCountry ? (status.routeCity ? `${status.routeCountry} - ${status.routeCity}` : status.routeCountry) : status.routeId)
             || "desconhecida";
-        statusLabel = `Ativo | ${routeText} | ${pingText}`;
+        statusLabel = `VPN ativa | ${routeText} | ${pingText}`;
     } else if (status?.state === "blocked_external") {
         statusColor = "var(--text-danger)";
         statusBg = "color-mix(in srgb, var(--info-danger-background) 55%, var(--background-secondary))";
@@ -1293,11 +1339,25 @@ export default definePlugin({
 
     flux: {
         CONNECTION_OPEN() {
+            setDiscordGatewayConnected(true);
             syncReportUsername();
             reportSession();
         },
 
+        CONNECTION_RESUMED() {
+            setDiscordGatewayConnected(true);
+        },
+
+        CONNECTION_CLOSED() {
+            setDiscordGatewayConnected(false);
+        },
+
+        CONNECTION_INTERRUPTED() {
+            setDiscordGatewayConnected(false);
+        },
+
         LOGOUT() {
+            setDiscordGatewayConnected(false);
             try { void Native?.setReportUsername?.("").catch(() => {}); } catch { /* Optional on older builds. */ }
             record("voce saiu da conta; a VPN do plugin permanece isolada e nao troca a rota automaticamente");
         }
@@ -1310,11 +1370,12 @@ export default definePlugin({
         pluginRunning = true;
         const generation = ++pluginGeneration;
         const isCurrent = () => pluginRunning && generation === pluginGeneration;
+        discordGatewayConnected = Boolean(UserStore.getCurrentUser());
         forceRegion();
         startStreamClaimWatch();
         if (!Native) return;
         startUpdateNotifications(isCurrent);
-        startOnlineCounter(isCurrent);
+        if (discordGatewayConnected) startOnlineCounter(isCurrent);
         void refreshPresenceStatus();
         presenceStatusTimer = setInterval(() => void refreshPresenceStatus(), 15_000);
         startAutoEnable(isCurrent);
@@ -1323,9 +1384,8 @@ export default definePlugin({
     stop() {
         pluginRunning = false;
         pluginGeneration++;
-        if (onlineCounterTimer) clearInterval(onlineCounterTimer);
-        onlineCounterTimer = null;
-        updateOnlineUsers(null);
+        discordGatewayConnected = false;
+        stopOnlineCounter();
         if (updateNotificationTimer) clearInterval(updateNotificationTimer);
         updateNotificationTimer = null;
         if (presenceStatusTimer) {
