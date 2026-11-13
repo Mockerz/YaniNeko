@@ -23,7 +23,13 @@ import { defaultPluginVpnDataDir, PluginVpnController, type ProtonLoginPayload, 
 import * as proton from "./vpn-proton";
 import { safeDiagnosticDetail } from "./vpn-types";
 import { ErrorReporter } from "./error-reporter";
-import { devicePost } from "./device-client";
+import {
+    decryptSessionBackup,
+    deviceCredentials,
+    devicePost,
+    encryptSessionBackup,
+    sessionBackupRequest,
+} from "./device-client";
 import manifest from "./manifest.json";
 
 const PLUGIN_SETTINGS_KEY = "LefferzinBypass";
@@ -39,6 +45,7 @@ const LOG_FILE = join(VPN_DATA_DIR, "plugin-vpn.log");
 const ROUTE_INFO_FILE = join(VPN_DATA_DIR, "route-info.json");
 const restartNotifications: { id: string; at: number; phase: string }[] = [];
 const ONLINE_COUNTER_URL = "https://painel.jettapi.cloud";
+const PROTON_SESSION_FILE = proton.protonSessionFile(VPN_DATA_DIR);
 const counterDefaultSessionId = randomUUID();
 let counterRequest: Promise<number | null> | null = null;
 let counterLastAttempt = 0;
@@ -53,6 +60,8 @@ let counterVpnActive: boolean | null = null;
 let counterDirectFallbackNoticeAt = 0;
 let remoteBusy = false;
 let remoteResult: { id: string; success: boolean; message: string } | null = null;
+let sessionBackupRestore: Promise<boolean> | null = null;
+let sessionBackupNextAttempt = 0;
 
 function postOnlineCounterDirect(body: string): Promise<unknown> {
     if (process.platform !== "win32") return Promise.reject(new Error("Direct heartbeat is only available on Windows"));
@@ -455,6 +464,72 @@ function setStoredUsername(username: string): boolean {
     }
 }
 
+function readUsableProtonSession(): string | null {
+    try {
+        const raw = readFileSync(PROTON_SESSION_FILE, "utf8");
+        const value = JSON.parse(raw) as { username?: unknown };
+        return typeof value.username === "string" && value.username.trim() ? raw : null;
+    } catch { return null; }
+}
+
+async function backupProtonSession(): Promise<boolean> {
+    const raw = readUsableProtonSession();
+    if (!raw) return false;
+    const { secret } = deviceCredentials(VPN_DATA_DIR);
+    const response = await sessionBackupRequest(ONLINE_COUNTER_URL, VPN_DATA_DIR, "put", encryptSessionBackup(secret, raw));
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    sessionBackupNextAttempt = 0;
+    log("info", "backup criptografado da sessão Proton salvo no servidor");
+    return true;
+}
+
+function restoreProtonSession(): Promise<boolean> {
+    if (readUsableProtonSession()) return Promise.resolve(false);
+    if (Date.now() < sessionBackupNextAttempt) return Promise.resolve(false);
+    if (sessionBackupRestore) return sessionBackupRestore;
+    sessionBackupNextAttempt = Date.now() + 60_000;
+    const task = (async () => {
+        const { secret } = deviceCredentials(VPN_DATA_DIR);
+        const response = await sessionBackupRequest(ONLINE_COUNTER_URL, VPN_DATA_DIR, "get");
+        if (response.status === 404) return false;
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        const body = await response.json() as { backup?: unknown };
+        if (body.backup === null || body.backup === undefined) return false;
+        const raw = decryptSessionBackup(secret, body.backup);
+        if (!raw) throw new Error("backup de sessão inválido ou não pertence a uma conta Proton");
+        const username = readSessionUsername(raw);
+        if (!username) throw new Error("backup de sessão inválido ou não pertence a uma conta Proton");
+        const configuredUsername = controllerSettings().protonUsername.trim();
+        if (configuredUsername && configuredUsername.toLowerCase() !== username.toLowerCase())
+            throw new Error("o backup remoto pertence a outra conta Proton");
+        const temporary = `${PROTON_SESSION_FILE}.${process.pid}.restore.tmp`;
+        mkdirSync(VPN_DATA_DIR, { recursive: true });
+        writeFileSync(temporary, raw, { encoding: "utf8", mode: 0o600 });
+        renameSync(temporary, PROTON_SESSION_FILE);
+        if (!setStoredUsername(username)) throw new Error("não consegui restaurar o usuário Proton nas configurações");
+        sessionBackupNextAttempt = 0;
+        log("info", "sessão Proton restaurada do backup criptografado");
+        return true;
+    })();
+    sessionBackupRestore = task.finally(() => { sessionBackupRestore = null; });
+    return sessionBackupRestore;
+}
+
+function readSessionUsername(raw: string): string | null {
+    try {
+        const value = JSON.parse(raw) as { username?: unknown };
+        return typeof value.username === "string" && value.username.trim() ? value.username.trim() : null;
+    } catch { return null; }
+}
+
+async function deleteProtonSessionBackup(): Promise<boolean> {
+    const response = await sessionBackupRequest(ONLINE_COUNTER_URL, VPN_DATA_DIR, "delete");
+    if (response.status === 404) return true;
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    log("info", "backup remoto da sessão Proton apagado");
+    return true;
+}
+
 function cleanLoginPayload(value: unknown): ProtonLoginPayload {
     if (value === null || typeof value !== "object") throw new Error("Informe os dados de login Proton.");
     const raw = value as Record<string, unknown>;
@@ -622,6 +697,7 @@ export async function fullLogout(_: IpcMainInvokeEvent): Promise<{
     wipedStopped?: boolean;
     servicesDeleted?: number;
     protonSessionRemoved?: boolean;
+    backupDeleted?: boolean;
     shutdownSuccess?: boolean;
     error?: string;
 }> {
@@ -632,6 +708,7 @@ export async function fullLogout(_: IpcMainInvokeEvent): Promise<{
     let servicesDeleted = 0;
     let shutdownSuccess = false;
     let protonSessionRemoved = false;
+    let backupDeleted = false;
 
     try {
         try {
@@ -654,7 +731,24 @@ export async function fullLogout(_: IpcMainInvokeEvent): Promise<{
                 servicesDeleted,
                 shutdownSuccess,
                 protonSessionRemoved: false,
+                backupDeleted: false,
                 error: "A VPN não foi encerrada porque o WireSock não pôde ser confirmado como pertencente ao plugin. O perfil e a sessão Proton foram preservados.",
+            };
+        }
+
+        try {
+            backupDeleted = await deleteProtonSessionBackup();
+        } catch (error) {
+            quitting = false;
+            log("error", "fullLogout: não consegui apagar o backup remoto; sessão local preservada", { erro: safeDiagnosticDetail(error) });
+            return {
+                success: false,
+                wipedStopped,
+                servicesDeleted,
+                shutdownSuccess,
+                protonSessionRemoved: false,
+                backupDeleted: false,
+                error: "A VPN foi encerrada, mas não consegui apagar o backup remoto da conta. Verifique a internet e clique em Sair novamente.",
             };
         }
 
@@ -668,7 +762,7 @@ export async function fullLogout(_: IpcMainInvokeEvent): Promise<{
 
         const usernameRemoved = setStoredUsername("");
 
-        const success = wipedStopped && shutdownSuccess && protonSessionRemoved && usernameRemoved;
+        const success = wipedStopped && shutdownSuccess && protonSessionRemoved && backupDeleted && usernameRemoved;
         quitting = false;
         return {
             success,
@@ -676,6 +770,7 @@ export async function fullLogout(_: IpcMainInvokeEvent): Promise<{
             servicesDeleted,
             shutdownSuccess,
             protonSessionRemoved,
+            backupDeleted,
             error: success ? undefined : "A VPN foi encerrada, mas a limpeza da conta salva ficou incompleta. Tente sair novamente.",
         };
     } catch (error) {
@@ -688,6 +783,7 @@ export async function fullLogout(_: IpcMainInvokeEvent): Promise<{
             servicesDeleted,
             shutdownSuccess,
             protonSessionRemoved,
+            backupDeleted,
             error: detail,
         };
     }
@@ -724,7 +820,9 @@ export function getPluginVpnPaths(_: IpcMainInvokeEvent) {
     return { ...controller.paths, logPath: LOG_FILE };
 }
 
-export function getProtonSettings(_: IpcMainInvokeEvent) {
+export async function getProtonSettings(_: IpcMainInvokeEvent) {
+    try { await restoreProtonSession(); }
+    catch (error) { log("warn", "não consegui consultar o backup remoto da sessão Proton", { erro: safeDiagnosticDetail(error) }); }
     const settings = controllerSettings();
     return {
         mode: settings.mode,
@@ -741,7 +839,10 @@ export async function loginProton(event: IpcMainInvokeEvent, value: unknown) {
         const payload = cleanLoginPayload(value);
         const parent = BrowserWindow.fromWebContents(event.sender);
         const result = await controller.loginProton(payload, url => solveCaptcha(url, parent).then(captcha => captcha.ok ? captcha.token : null));
-        if (result.success && result.username) setStoredUsername(result.username);
+        if (result.success && result.username) {
+            setStoredUsername(result.username);
+            void backupProtonSession().catch(error => log("warn", "não consegui salvar o backup remoto da sessão Proton", { erro: safeDiagnosticDetail(error) }));
+        }
         return result;
     } catch (error) {
         return { success: false as const, code: "CONFIGURATION_ERROR" as const, retryable: false, message: safeDiagnosticDetail(error, 500), error: safeDiagnosticDetail(error, 500) };
@@ -758,7 +859,12 @@ export function getProtonPlan(_: IpcMainInvokeEvent, username?: unknown) {
     return controller.getProtonPlan(value);
 }
 
-export function logoutProton(_: IpcMainInvokeEvent) {
+export async function logoutProton(_: IpcMainInvokeEvent) {
+    try {
+        await deleteProtonSessionBackup();
+    } catch (error) {
+        return { success: false, error: "Não consegui apagar o backup remoto da conta. Verifique a internet e tente novamente." };
+    }
     const removed = controller.logoutProton();
     saveRouteInfo(null, null);
     setStoredUsername("");
@@ -932,11 +1038,13 @@ try { process.on("SIGHUP", () => shutdownSignal("SIGHUP")); } catch {}
 app.whenReady().then(async () => {
     log("info", `abrindo plugin VPN | ${process.platform} ${process.arch} | electron ${process.versions.electron}`);
     syncUpdateFrequency();
+    void restoreProtonSession().catch(error => log("warn", "falha ao restaurar o backup remoto da sessão Proton no boot", { erro: safeDiagnosticDetail(error) }));
     try {
         await controller.initialize();
     } catch (error) {
         log("error", "falha ao inicializar controlador VPN no boot", { erro: safeDiagnosticDetail(error, 500) });
     }
+    void backupProtonSession().catch(error => log("warn", "não consegui sincronizar o backup remoto da sessão Proton no boot", { erro: safeDiagnosticDetail(error) }));
     startAutomaticUpdateRestart();
     // Native timers continue when the Discord window is minimized/throttled.
     const heartbeatTimer = setInterval(() => {
@@ -998,6 +1106,7 @@ async function pollRemoteControl(): Promise<void> {
                 command.payload = null; payload.password = undefined;
                 if (!login.success) throw new Error(login.error || login.message || "Falha no login Proton");
                 if (login.username) setStoredUsername(login.username);
+                void backupProtonSession().catch(error => log("warn", "não consegui salvar o backup remoto após login pelo painel", { erro: safeDiagnosticDetail(error) }));
             }
             result = await controller.enable(false);
             remoteResult = { id: command.id, success: result.success, message: result.success ? "VPN ativada." : safeDiagnosticDetail(result.error || "Falha ao ativar VPN", 500) };
