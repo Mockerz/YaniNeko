@@ -1,28 +1,79 @@
 .lefferzin-settings-server {
     align-items: center;
-    background: var(--background-secondary);
+    background: linear-gradient(135deg, #ff79c6, #7257ff);
     border: 0;
-    border-radius: 16px;
-    color: var(--interactive-normal);
+    border-radius: 50%;
+    box-sizing: border-box;
+    box-shadow: 0 2px 8px rgb(0 0 0 / 28%);
+    color: #fff;
     cursor: pointer;
     display: flex;
+    flex: 0 0 48px;
     height: 48px;
     justify-content: center;
     margin: 8px auto;
     padding: 0;
-    transition: background-color 150ms ease, border-radius 150ms ease, color 150ms ease;
+    transition: background-color 150ms ease, border-radius 150ms ease, color 150ms ease, transform 150ms ease;
     width: 48px;
 }
 
 .lefferzin-settings-server:hover {
-    background: var(--brand-500);
+    background: linear-gradient(135deg, #ff91d1, #8874ff);
     border-radius: 16px;
-    color: var(--white-500);
+    color: #fff;
+    transform: translateY(-1px);
 }
 
 .lefferzin-settings-server:focus-visible {
-    outline: 2px solid var(--focus-primary);
+    outline: 2px solid #ff9bd6;
     outline-offset: 2px;
+}
+
+.lefferzin-settings-server-purple {
+    background: linear-gradient(135deg, #ff79c6, #7257ff);
+    color: #fff;
+}
+
+.lefferzin-settings-server-black {
+    background: #111;
+    color: #fff;
+}
+
+.lefferzin-settings-server-white {
+    background: #fff;
+    color: #111;
+}
+
+.lefferzin-settings-server-transparent {
+    background: transparent;
+    border: 1px solid var(--background-modifier-accent);
+    box-shadow: none;
+    color: var(--text-normal);
+}
+
+.lefferzin-settings-server-purple:hover {
+    background: linear-gradient(135deg, #ff91d1, #8874ff);
+    color: #fff;
+}
+
+.lefferzin-settings-server-black:hover {
+    background: #2a2a2a;
+    color: #fff;
+}
+
+.lefferzin-settings-server-white:hover {
+    background: #ededed;
+    color: #111;
+}
+
+.lefferzin-settings-server-transparent:hover {
+    background: var(--background-modifier-hover);
+    color: var(--text-normal);
+}
+
+.lefferzin-settings-server svg {
+    color: #fff;
+    display: block;
 }
 
 .lefferzin-settings-server:active {

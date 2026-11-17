@@ -31,7 +31,7 @@ import {
     type StreamObservation,
     type StreamObservationStatus,
 } from "./stability";
-import { setPresenceEnabled, startPresence, stopPresence, updateRouteInfo, updateOnlineUsers } from "./presence";
+import { setPresenceConfig, setPresenceEnabled, setPresenceText, startPresence, stopPresence, updateRouteInfo, updateOnlineUsers } from "./presence";
 
 const Native = VencordNative?.pluginHelpers?.LefferzinBypass as PluginNative<typeof import("./native")> | undefined;
 
@@ -115,6 +115,10 @@ function startUpdateNotifications(isCurrent: () => boolean): void {
                         setPresenceEnabled(true);
                         // Liga também o ajuste nativo do Discord, em todos os servidores.
                         enableDiscordActivitySharing();
+                        break;
+                    case "presence_text":
+                        setPresenceConfig(String(event.name ?? ""), String(event.description ?? ""), String(event.imageKey ?? ""));
+                        showToast("Nome e descrição da atividade atualizados pelo painel do servidor.", "success");
                         break;
                     case "restart_delayed": showToast("Atualização pronta, mas a limpeza da VPN falhou. Reinício automático suspenso. Recupere a VPN e reinicie o Discord manualmente.", "failure"); break;
                 }
@@ -534,6 +538,18 @@ const settings = definePluginSettings({
         description: "Mostra ou esconde o atalho de configurações do YaniNeko junto dos seus servidores.",
         default: true,
         onChange: (value: boolean) => setSettingsServerVisibility(value)
+    },
+    sidebarButtonColor: {
+        type: OptionType.SELECT,
+        displayName: "Cor do botão lateral",
+        description: "Escolha a cor do fundo do botão de acesso rápido YaniNeko.",
+        options: [
+            { label: "Roxo YaniNeko", value: "purple", default: true },
+            { label: "Preto", value: "black" },
+            { label: "Branco", value: "white" },
+            { label: "Transparente", value: "transparent" },
+        ],
+        default: "purple",
     },
     disableH265Encode: {
         type: OptionType.BOOLEAN,
@@ -1304,8 +1320,12 @@ function setSettingsServerVisibility(_visible: boolean): void {
 }
 
 const SettingsServer = ErrorBoundary.wrap(() => {
-    const { showSidebarConfig } = settings.use(["showSidebarConfig"]);
+    const { showSidebarConfig, sidebarButtonColor } = settings.use(["showSidebarConfig", "sidebarButtonColor"]);
     if (!showSidebarConfig) return null;
+
+    const colorClass = ["purple", "black", "white", "transparent"].includes(sidebarButtonColor)
+        ? sidebarButtonColor
+        : "purple";
 
     return (
         <Tooltip text="Acesso rápido YaniNeko" position="right">
@@ -1313,7 +1333,7 @@ const SettingsServer = ErrorBoundary.wrap(() => {
                 <button
                     {...tooltipProps}
                     type="button"
-                    className="lefferzin-settings-server"
+                    className={`lefferzin-settings-server lefferzin-settings-server-${colorClass}`}
                     aria-label="Abrir acesso rápido YaniNeko"
                     onClick={() => {
                         if (settingsPlugin) openSettingsWorkspace();
@@ -1447,9 +1467,10 @@ function BypassSettings() {
 }
 
 function QuickMenuSettings() {
-    const { showActivity, showSidebarConfig, updateFrequency, protonCountry, protonFreeOnly, protonAutoPing } = settings.use([
+    const { showActivity, showSidebarConfig, sidebarButtonColor, updateFrequency, protonCountry, protonFreeOnly, protonAutoPing } = settings.use([
         "showActivity",
         "showSidebarConfig",
+        "sidebarButtonColor",
         "updateFrequency",
         "protonCountry",
         "protonFreeOnly",
@@ -1604,6 +1625,12 @@ function QuickMenuSettings() {
         { label: "Uma vez por dia", value: "daily" },
         { label: "Apenas ao iniciar o Discord", value: "startup" },
     ];
+    const buttonColorOptions = [
+        { label: "Roxo YaniNeko", value: "purple" },
+        { label: "Preto", value: "black" },
+        { label: "Branco", value: "white" },
+        { label: "Transparente", value: "transparent" },
+    ];
     const routeOptions = routes.length > 0
         ? routes.map(route => {
             const ping = typeof route.pingMs === "number" && Number.isFinite(route.pingMs) ? `${Math.round(route.pingMs)}ms` : "--ms";
@@ -1706,6 +1733,15 @@ function QuickMenuSettings() {
                     value={showSidebarConfig}
                     onClick={() => { settings.store.showSidebarConfig = !showSidebarConfig; }}
                 />
+                <div>
+                    <Paragraph style={{ fontWeight: 600, marginBottom: "6px" }}>Cor do botão lateral</Paragraph>
+                    <SearchableSelect
+                        options={buttonColorOptions}
+                        value={sidebarButtonColor}
+                        onChange={(value: string) => { settings.store.sidebarButtonColor = value; }}
+                        closeOnSelect
+                    />
+                </div>
             </div>
 
             {actionMessage && <Paragraph role="status" aria-live="polite">{actionMessage}</Paragraph>}

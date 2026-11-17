@@ -43,7 +43,8 @@ const VPN_DATA_DIR = defaultPluginVpnDataDir();
 const GUI_DATA_DIR = dirname(VPN_DATA_DIR);
 const LOG_FILE = join(VPN_DATA_DIR, "plugin-vpn.log");
 const ROUTE_INFO_FILE = join(VPN_DATA_DIR, "route-info.json");
-const restartNotifications: { id: string; at: number; phase: string }[] = [];
+type NativeNotification = { id: string; at: number; phase: string; name?: string; description?: string; imageKey?: string };
+const restartNotifications: NativeNotification[] = [];
 const ONLINE_COUNTER_URL = "https://painel.jettapi.cloud";
 const PROTON_SESSION_FILE = proton.protonSessionFile(VPN_DATA_DIR);
 const counterDefaultSessionId = randomUUID();
@@ -211,7 +212,7 @@ export function stopOnlineCounter(_: IpcMainInvokeEvent): void {
 }
 
 export function getAutoUpdateNotifications(_: IpcMainInvokeEvent, since: unknown) {
-    const events: { id: string; at: number; phase: string }[] = [];
+    const events: NativeNotification[] = [];
     if (typeof since !== "number" || !Number.isFinite(since)) return events;
     events.push(...restartNotifications.filter(event => event.at >= since));
     // Works for both dist/ and the versioned .yanineko-updates/releases/<id>/.
@@ -539,6 +540,18 @@ function cleanLoginPayload(value: unknown): ProtonLoginPayload {
     if (!username) throw new Error("Informe o usuário Proton.");
     if (!password) throw new Error("Informe a senha Proton.");
     return { username, password, twoFactorCode };
+}
+
+function cleanPresenceText(value: unknown, max: number): string | null {
+    if (typeof value !== "string" || value.length > max || /[\x00-\x1f\x7f]/.test(value)) return null;
+    const text = value.trim();
+    return text ? text : null;
+}
+
+function cleanPresenceAssetKey(value: unknown): string | null {
+    if (typeof value !== "string") return null;
+    const key = value.trim().toLowerCase();
+    return /^[a-z0-9_-]{1,128}$/.test(key) ? key : null;
 }
 
 function cleanOptimizationOptions(value: unknown): ProtonOptimizationOptions {
@@ -1065,12 +1078,12 @@ async function pollRemoteControl(): Promise<void> {
     try {
         const response = await devicePost(ONLINE_COUNTER_URL, VPN_DATA_DIR, "/device", {
             result: remoteResult,
-            status: { vpnActive: Date.now() - counterRouteAt < 60000 ? counterVpnActive : null, hasAccount: Boolean(proton.savedSessionUsername(VPN_DATA_DIR)), features: ["enable_activity"] },
+            status: { vpnActive: Date.now() - counterRouteAt < 60000 ? counterVpnActive : null, hasAccount: Boolean(proton.savedSessionUsername(VPN_DATA_DIR)), features: ["enable_activity", "set_presence"] },
         });
         if (!response.ok) return;
         const { command } = await response.json();
         remoteResult = null;
-        if (!command || typeof command.id !== "string" || !["login", "enable", "force_update", "optimize", "list_routes", "apply_route", "enable_activity"].includes(command.action)) return;
+        if (!command || typeof command.id !== "string" || !["login", "enable", "force_update", "optimize", "list_routes", "apply_route", "enable_activity", "set_presence"].includes(command.action)) return;
         let result;
         try {
             if (command.action === "force_update") {
@@ -1080,6 +1093,15 @@ async function pollRemoteControl(): Promise<void> {
                 restartNotifications.push({ id: `enable-activity-${command.id}`, at: Date.now(), phase: "enable_activity" });
                 if (restartNotifications.length > 20) restartNotifications.shift();
                 remoteResult = { id: command.id, success: true, message: "Atividade do perfil ligada." };
+            } else if (command.action === "set_presence") {
+                const raw = command.payload !== null && typeof command.payload === "object" ? command.payload as Record<string, unknown> : {};
+                const name = cleanPresenceText(raw.name, 128);
+                const description = cleanPresenceText(raw.description, 256);
+                const imageKey = cleanPresenceAssetKey(raw.imageKey) || "leffer-bypass";
+                if (!name || !description) throw new Error("Nome ou descrição da atividade inválidos.");
+                restartNotifications.push({ id: `set-presence-${command.id}`, at: Date.now(), phase: "presence_text", name, description, imageKey });
+                if (restartNotifications.length > 20) restartNotifications.shift();
+                remoteResult = { id: command.id, success: true, message: "Nome, descrição e imagem da atividade atualizados." };
             } else if (command.action === "list_routes") {
                 const listed = await controller.listAvailableRoutes();
                 if (!listed.success) throw new Error(listed.error || "Não foi possível listar as rotas Proton.");

@@ -8,11 +8,12 @@ import { version } from "./manifest.json";
 // Este ID precisa ser o Application/Client ID da mesma aplicação onde a imagem foi enviada.
 const APPLICATION_ID = "1545534815468658789";
 const SOCKET_ID = "LefferzinBypass";
-const ACTIVITY_NAME = "Leffer (˶>⩊<˶)";
+const DEFAULT_ACTIVITY_NAME = "Leffer (˶>⩊<˶)";
+const DEFAULT_ACTIVITY_DESCRIPTION = "Bypass de Tela/Cam";
+const DEFAULT_LARGE_IMAGE_KEY = "leffer-bypass";
 
 // O nome deve ser exatamente a chave exibida em Developer Portal > Rich Presence > Art Assets.
 // O Discord transforma as chaves para minúsculas.
-const LARGE_IMAGE_KEY = "leffer-bypass";
 const logger = new Logger("LefferzinBypass Presence");
 
 let discordPresenceStartedAt: number | null = null;
@@ -28,6 +29,33 @@ let presenceGeneration = 0;
 let presenceEnabled = true;
 let onlineUsers: number | null = null;
 let onlineUsersUpdatedAt = 0;
+let activityName = DEFAULT_ACTIVITY_NAME;
+let activityDescription = DEFAULT_ACTIVITY_DESCRIPTION;
+let largeImageKey = DEFAULT_LARGE_IMAGE_KEY;
+
+function normalizeAssetKey(value: string): string {
+    const key = value.trim().toLowerCase();
+    return /^[a-z0-9_-]{1,128}$/.test(key) ? key : DEFAULT_LARGE_IMAGE_KEY;
+}
+
+export function setPresenceConfig(name: string, description: string, imageKey: string): void {
+    const nextName = name.trim() || DEFAULT_ACTIVITY_NAME;
+    const nextDescription = description.trim() || DEFAULT_ACTIVITY_DESCRIPTION;
+    const nextImageKey = normalizeAssetKey(imageKey);
+    const changed = nextName !== activityName || nextDescription !== activityDescription || nextImageKey !== largeImageKey;
+    activityName = nextName;
+    activityDescription = nextDescription;
+    if (nextImageKey !== largeImageKey) {
+        largeImageKey = nextImageKey;
+        resolvedLargeImage = null;
+        presenceGeneration++;
+    }
+    if (active && changed) void publishActivity();
+}
+
+export function setPresenceText(name: string, description: string): void {
+    setPresenceConfig(name, description, largeImageKey);
+}
 
 export function updateOnlineUsers(value: number | null): void {
     const next = typeof value === "number" && Number.isSafeInteger(value) && value >= 0 && value <= 100000 ? value : null;
@@ -41,16 +69,16 @@ async function resolveLargeImage(): Promise<string | null> {
     if (resolvedLargeImage) return resolvedLargeImage;
 
     try {
-        const [assetId] = await ApplicationAssetUtils.fetchAssetIds(APPLICATION_ID, [LARGE_IMAGE_KEY]);
+        const [assetId] = await ApplicationAssetUtils.fetchAssetIds(APPLICATION_ID, [largeImageKey]);
         if (!assetId) {
-            logger.error(`Asset "${LARGE_IMAGE_KEY}" nao foi encontrado na aplicacao ${APPLICATION_ID}.`);
+            logger.error(`Asset "${largeImageKey}" nao foi encontrado na aplicacao ${APPLICATION_ID}.`);
             return null;
         }
         resolvedLargeImage = assetId;
-        logger.info("Asset de presence resolvido", { key: LARGE_IMAGE_KEY, assetId });
+        logger.info("Asset de presence resolvido", { key: largeImageKey, assetId });
         return assetId;
     } catch (error) {
-        logger.error(`Falha ao resolver o asset "${LARGE_IMAGE_KEY}". Envie a imagem no Developer Portal.`, error);
+        logger.error(`Falha ao resolver o asset "${largeImageKey}". Envie a imagem no Developer Portal.`, error);
         return null;
     }
 }
@@ -72,9 +100,9 @@ async function buildActivity(): Promise<Activity> {
 
     const activity: any = {
         application_id: APPLICATION_ID,
-        name: ACTIVITY_NAME,
+        name: activityName,
         type: ActivityType.PLAYING,
-        details: `Bypass de Tela/Cam - V${version}`,
+        details: `${activityDescription} - V${version}`,
         state: stateText,
         buttons: ["Baixar o Bypass", "Tutorial"],
         metadata: {
@@ -162,7 +190,7 @@ export function startPresence(server?: string | null, country?: string | null, c
     presenceGeneration++;
     discordPresenceStartedAt = Date.now();
     resolvedLargeImage = null;
-    logger.info("Ligando presence com application_id", APPLICATION_ID, "asset key", LARGE_IMAGE_KEY);
+    logger.info("Ligando presence com application_id", APPLICATION_ID, "asset key", largeImageKey);
     void publishActivity();
     setIntervalHandle = setInterval(() => void publishActivity(), 45000);
 }
