@@ -118,7 +118,6 @@ function startUpdateNotifications(isCurrent: () => boolean): void {
                         break;
                     case "presence_text":
                         setPresenceConfig(String(event.name ?? ""), String(event.description ?? ""), String(event.imageKey ?? ""));
-                        showToast("Nome e descrição da atividade atualizados pelo painel do servidor.", "success");
                         break;
                     case "restart_delayed": showToast("Atualização pronta, mas a limpeza da VPN falhou. Reinício automático suspenso. Recupere a VPN e reinicie o Discord manualmente.", "failure"); break;
                 }
