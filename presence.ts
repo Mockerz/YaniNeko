@@ -8,9 +8,9 @@ import { version } from "./manifest.json";
 // Este ID precisa ser o Application/Client ID da mesma aplicação onde a imagem foi enviada.
 const APPLICATION_ID = "1545534815468658789";
 const SOCKET_ID = "LefferzinBypass";
-const DEFAULT_ACTIVITY_NAME = "Leffer (˶>⩊<˶)";
-const DEFAULT_ACTIVITY_DESCRIPTION = "Bypass de Tela/Cam";
-const DEFAULT_LARGE_IMAGE_KEY = "leffer-bypass";
+export const DEFAULT_ACTIVITY_NAME = "Leffer (˶>⩊<˶)";
+export const DEFAULT_ACTIVITY_DESCRIPTION = "Bypass de Tela/Cam";
+export const DEFAULT_LARGE_IMAGE_KEY = "leffer-bypass";
 
 // O nome deve ser exatamente a chave exibida em Developer Portal > Rich Presence > Art Assets.
 // O Discord transforma as chaves para minúsculas.

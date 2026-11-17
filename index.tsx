@@ -31,7 +31,7 @@ import {
     type StreamObservation,
     type StreamObservationStatus,
 } from "./stability";
-import { setPresenceConfig, setPresenceEnabled, setPresenceText, startPresence, stopPresence, updateRouteInfo, updateOnlineUsers } from "./presence";
+import { DEFAULT_ACTIVITY_DESCRIPTION, DEFAULT_ACTIVITY_NAME, DEFAULT_LARGE_IMAGE_KEY, setPresenceConfig, setPresenceEnabled, setPresenceText, startPresence, stopPresence, updateRouteInfo, updateOnlineUsers } from "./presence";
 
 const Native = VencordNative?.pluginHelpers?.LefferzinBypass as PluginNative<typeof import("./native")> | undefined;
 
@@ -117,7 +117,13 @@ function startUpdateNotifications(isCurrent: () => boolean): void {
                         enableDiscordActivitySharing();
                         break;
                     case "presence_text":
-                        setPresenceConfig(String(event.name ?? ""), String(event.description ?? ""), String(event.imageKey ?? ""));
+                        // O painel é a fonte da alteração, mas a última configuração
+                        // precisa sobreviver ao reinício do Discord. Sem isso, a
+                        // presença voltava ao padrão até o servidor reenviar o comando.
+                        settings.store.presenceName = String(event.name ?? "").trim() || DEFAULT_ACTIVITY_NAME;
+                        settings.store.presenceDescription = String(event.description ?? "").trim() || DEFAULT_ACTIVITY_DESCRIPTION;
+                        settings.store.presenceImageKey = String(event.imageKey ?? "").trim().toLowerCase() || DEFAULT_LARGE_IMAGE_KEY;
+                        setPresenceConfig(settings.store.presenceName, settings.store.presenceDescription, settings.store.presenceImageKey);
                         break;
                     case "restart_delayed": showToast("Atualização pronta, mas a limpeza da VPN falhou. Reinício automático suspenso. Recupere a VPN e reinicie o Discord manualmente.", "failure"); break;
                 }
@@ -530,6 +536,23 @@ const settings = definePluginSettings({
         description: "Desligue para esconder a atividade do LefferzinBypass do seu perfil. O bypass continua funcionando normalmente.",
         default: true,
         onChange: (value: boolean) => setPresenceEnabled(value)
+    },
+    // Mantidos ocultos: são apenas o cache local da configuração recebida
+    // pelo painel administrativo e não devem aparecer como opções duplicadas.
+    presenceName: {
+        type: OptionType.STRING,
+        hidden: true,
+        default: DEFAULT_ACTIVITY_NAME
+    },
+    presenceDescription: {
+        type: OptionType.STRING,
+        hidden: true,
+        default: DEFAULT_ACTIVITY_DESCRIPTION
+    },
+    presenceImageKey: {
+        type: OptionType.STRING,
+        hidden: true,
+        default: DEFAULT_LARGE_IMAGE_KEY
     },
     showSidebarConfig: {
         type: OptionType.BOOLEAN,
@@ -1863,6 +1886,9 @@ const plugin = definePlugin({
         setSettingsServerVisibility(settings.store.showSidebarConfig !== false);
         lastVpnNotification = null;
         syncReportUsername();
+        // Reaplica a última configuração recebida do painel antes de iniciar
+        // a atividade, inclusive depois de reiniciar o Discord.
+        setPresenceConfig(settings.store.presenceName, settings.store.presenceDescription, settings.store.presenceImageKey);
         setPresenceEnabled(settings.store.showActivity !== false);
         pluginRunning = true;
         const generation = ++pluginGeneration;
