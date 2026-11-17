@@ -113,9 +113,8 @@ async function buildActivity(): Promise<Activity> {
         },
         timestamps: { start },
         assets: {
-            ...(largeImage ? { large_image: largeImage, small_image: largeImage } : {}),
+            ...(largeImage ? { large_image: largeImage } : {}),
             large_text: "Leffer Bypass",
-            small_text: activityName,
         } as ActivityAssets,
         instance: false,
     };
