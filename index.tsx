@@ -4,18 +4,23 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
+import "./style.css";
+
 import { sendBotMessage } from "@api/Commands";
 import { showNotification } from "@api/Notifications";
+import { addServerListElement, removeServerListElement, ServerListRenderPosition } from "@api/ServerList";
 import { definePluginSettings } from "@api/Settings";
 import { getUserSettingLazy } from "@api/UserSettings";
 import { Button } from "@components/Button";
+import ErrorBoundary from "@components/ErrorBoundary";
+import { MainSettingsIcon } from "@components/Icons";
 import { Paragraph } from "@components/Paragraph";
 import { copyWithToast } from "@utils/discord";
 import { Logger } from "@utils/Logger";
 import { useAwaiter } from "@utils/react";
 import definePlugin, { OptionType, PluginNative } from "@utils/types";
 import { findStoreLazy } from "@webpack";
-import { Constants, MaskedLink, React, RestAPI, SearchableSelect, TextInput, UserStore, useEffect, useState } from "@webpack/common";
+import { Constants, MaskedLink, Modal, React, RestAPI, SearchableSelect, TextInput, Tooltip, UserStore, openModal, useEffect, useState } from "@webpack/common";
 
 import {
     evaluateStreamObservation,
@@ -523,6 +528,13 @@ const settings = definePluginSettings({
         default: true,
         onChange: (value: boolean) => setPresenceEnabled(value)
     },
+    showSidebarConfig: {
+        type: OptionType.BOOLEAN,
+        displayName: "Mostrar configurações na barra de servidores",
+        description: "Mostra ou esconde o atalho de configurações do YaniNeko junto dos seus servidores.",
+        default: true,
+        onChange: (value: boolean) => setSettingsServerVisibility(value)
+    },
     disableH265Encode: {
         type: OptionType.BOOLEAN,
         displayName: "Tela Preta? tente isso (se tiver ativado desligue)",
@@ -878,10 +890,6 @@ function VpnPanel() {
 
     return (
         <section style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
-            <div>
-                <Paragraph>Suporte</Paragraph>
-                <MaskedLink href="https://discord.gg/WX8AnmAp44" style={{ display: "inline-block", marginTop: "10px", background: "#238636", color: "#fff", padding: "10px 16px", borderRadius: "8px", fontWeight: 700 }}>Entrar no servidor de suporte</MaskedLink>
-            </div>
             <Paragraph style={{ margin: 0, padding: "10px 12px", borderRadius: "8px", background: statusBg, color: statusColor, fontSize: "14px", fontWeight: 600 }}>
                 <strong>Status:</strong> {statusLabel}
             </Paragraph>
@@ -1283,12 +1291,464 @@ async function buildReport() {
     return lines.join("\n");
 }
 
-export default definePlugin({
+// Referência preenchida depois que o plugin é criado. O componente da barra de
+// servidores é renderizado pelo ServerListAPI, fora do objeto do plugin.
+let settingsPlugin: any;
+let settingsServerRegistered = false;
+
+function setSettingsServerVisibility(_visible: boolean): void {
+    if (!settingsServerRegistered) {
+        addServerListElement(ServerListRenderPosition.In, SettingsServer);
+        settingsServerRegistered = true;
+    }
+}
+
+const SettingsServer = ErrorBoundary.wrap(() => {
+    const { showSidebarConfig } = settings.use(["showSidebarConfig"]);
+    if (!showSidebarConfig) return null;
+
+    return (
+        <Tooltip text="Acesso rápido YaniNeko" position="right">
+            {tooltipProps => (
+                <button
+                    {...tooltipProps}
+                    type="button"
+                    className="lefferzin-settings-server"
+                    aria-label="Abrir acesso rápido YaniNeko"
+                    onClick={() => {
+                        if (settingsPlugin) openSettingsWorkspace();
+                    }}
+                >
+                    <MainSettingsIcon width={24} height={24} />
+                </button>
+            )}
+        </Tooltip>
+    );
+}, { noop: true });
+
+interface SettingsToggleProps {
+    label: string;
+    description?: string;
+    value: boolean;
+    onClick(): void;
+}
+
+function SettingsToggle({ label, description, value, onClick }: SettingsToggleProps) {
+    return (
+        <button
+            type="button"
+            className={value ? "lefferzin-settings-toggle lefferzin-settings-toggle-on" : "lefferzin-settings-toggle lefferzin-settings-toggle-off"}
+            onClick={onClick}
+        >
+            <span className="lefferzin-settings-toggle-copy">
+                <strong>{label}</strong>
+                {description && <small>{description}</small>}
+            </span>
+            <span className="lefferzin-settings-toggle-state">{value ? "ON" : "OFF"}</span>
+        </button>
+    );
+}
+
+function RegionPreferencesSettings() {
+    return (
+        <div className="lefferzin-settings-card">
+            <div>
+                <h3>Regiões preferidas</h3>
+                <p>Escolha por onde as suas chamadas e transmissões do Go Live devem conectar.</p>
+            </div>
+            <VoiceRegionPicker />
+            <StreamRegionPicker />
+        </div>
+    );
+}
+
+function AdvancedSettings() {
+    const { protonCountry, protonFreeOnly, protonAutoPing, updateFrequency, disableH265Encode } = settings.use([
+        "protonCountry",
+        "protonFreeOnly",
+        "protonAutoPing",
+        "updateFrequency",
+        "disableH265Encode",
+    ]);
+
+    const updateOptions = [
+        { label: "A cada 3 horas (padrão)", value: "3h" },
+        { label: "Uma vez por dia", value: "daily" },
+        { label: "Apenas ao iniciar o Discord", value: "startup" },
+    ];
+
+    return (
+        <div className="lefferzin-settings-card">
+            <div>
+                <h3>Preferências avançadas</h3>
+                <p>Essas opções controlam a escolha das rotas, atualizações e o codec usado no envio de vídeo.</p>
+            </div>
+
+            <div>
+                <Paragraph style={{ fontWeight: 600, marginBottom: "6px" }}>Países preferidos</Paragraph>
+                <TextInput
+                    value={protonCountry}
+                    onChange={value => { settings.store.protonCountry = value; }}
+                    placeholder="ex.: BR,US,NL"
+                />
+                <Paragraph style={{ color: "var(--text-muted)", fontSize: "12px", margin: "6px 0 0" }}>
+                    Use códigos de 2 letras separados por vírgula. Vazio = escolha automática.
+                </Paragraph>
+            </div>
+
+            <SettingsToggle
+                label="Somente servidores gratuitos"
+                description="Ignora rotas pagas da Proton VPN."
+                value={protonFreeOnly}
+                onClick={() => { settings.store.protonFreeOnly = !protonFreeOnly; }}
+            />
+            <SettingsToggle
+                label="Priorizar menor ping"
+                description="Escolhe a rota com menor latência ao otimizar."
+                value={protonAutoPing}
+                onClick={() => { settings.store.protonAutoPing = !protonAutoPing; }}
+            />
+            <SettingsToggle
+                label="Desativar H.265 para evitar tela preta"
+                description="Ative se a transmissão aparecer preta em algumas placas NVIDIA."
+                value={disableH265Encode}
+                onClick={() => { settings.store.disableH265Encode = !disableH265Encode; }}
+            />
+
+            <div>
+                <Paragraph style={{ fontWeight: 600, marginBottom: "6px" }}>Frequência de atualização</Paragraph>
+                <SearchableSelect
+                    options={updateOptions}
+                    value={updateFrequency}
+                    onChange={(value: string) => { settings.store.updateFrequency = value; }}
+                    closeOnSelect
+                />
+            </div>
+        </div>
+    );
+}
+
+function BypassSettings() {
+    return (
+        <div className="lefferzin-settings-page">
+            <div className="lefferzin-settings-page-heading">
+                <div>
+                    <h2>Bypass</h2>
+                    <p>Conta Proton, conexão do túnel, rotas disponíveis e preferências.</p>
+                </div>
+                <span className="lefferzin-settings-page-badge">VPN</span>
+            </div>
+
+            <VpnPanel />
+            <RegionPreferencesSettings />
+            <AdvancedSettings />
+        </div>
+    );
+}
+
+function QuickMenuSettings() {
+    const { showActivity, showSidebarConfig, updateFrequency, protonCountry, protonFreeOnly, protonAutoPing } = settings.use([
+        "showActivity",
+        "showSidebarConfig",
+        "updateFrequency",
+        "protonCountry",
+        "protonFreeOnly",
+        "protonAutoPing",
+    ]);
+    const [status, setStatus] = useState<PluginVpnStatus | null>(null);
+    const [busyAction, setBusyAction] = useState<"optimize" | "refresh" | "screen" | null>(null);
+    const [screenRecoverySeconds, setScreenRecoverySeconds] = useState(0);
+    const [actionMessage, setActionMessage] = useState("");
+    const [routes, setRoutes] = useState<ProtonRouteEntry[]>([]);
+    const [selectedRouteId, setSelectedRouteId] = useState<string | null>(null);
+    const [loadingRoutes, setLoadingRoutes] = useState(false);
+    const [applyingRoute, setApplyingRoute] = useState(false);
+
+    const refreshStatus = async () => {
+        if (!Native) return;
+        try {
+            setStatus(await Native.getVpnStatus() as PluginVpnStatus);
+        } catch (error) {
+            recordError("Falha ao atualizar o status rápido da VPN", error);
+        }
+    };
+
+    const loadRoutes = async () => {
+        if (!Native || loadingRoutes || busyAction) return;
+        setLoadingRoutes(true);
+        setActionMessage("");
+        try {
+            const result = await Native.listAvailableProtonServers() as { success?: boolean; servers?: ProtonRouteEntry[]; error?: string };
+            if (!result.success) throw new Error(result.error || "Não foi possível carregar as rotas disponíveis.");
+            const list = Array.isArray(result.servers) ? result.servers : [];
+            setRoutes(list);
+            setSelectedRouteId(current => {
+                if (current && list.some(route => route.id === current)) return current;
+                return list[0]?.id ?? null;
+            });
+            setActionMessage(`${list.length} rotas disponíveis.`);
+        } catch (error) {
+            const message = error instanceof Error ? error.message : String(error);
+            setActionMessage(`Rotas: ${message}`);
+            showToast(`Não foi possível carregar as rotas: ${message}`, "failure");
+        } finally {
+            setLoadingRoutes(false);
+        }
+    };
+
+    useEffect(() => {
+        void refreshStatus();
+        const timer = setInterval(() => void refreshStatus(), 5_000);
+        return () => clearInterval(timer);
+    }, []);
+
+    const runOptimize = async () => {
+        if (!Native || busyAction) return;
+        setBusyAction("optimize");
+        setActionMessage("");
+        try {
+            const result = await Native.optimizeProtonRoute({
+                requestId: `quick-${Date.now()}`,
+                speedTest: true,
+                country: protonCountry,
+                freeOnly: protonFreeOnly,
+                autoPing: protonAutoPing,
+            }) as { success?: boolean; selectedServer?: string; server?: string; error?: string; message?: string };
+            if (result.success === false) throw new Error(result.error || result.message || "Não foi possível otimizar a rota.");
+            const route = result.selectedServer || result.server || "uma rota alternativa";
+            setActionMessage(`Rota otimizada: ${route}.`);
+            showToast(`Rota otimizada: ${route}.`, "success");
+            await refreshStatus();
+        } catch (error) {
+            const message = error instanceof Error ? error.message : String(error);
+            setActionMessage(`Otimização: ${message}`);
+            showToast(`Não foi possível otimizar a rota: ${message}`, "failure");
+        } finally {
+            setBusyAction(null);
+        }
+    };
+
+    const runRefresh = async () => {
+        if (!Native || busyAction || loadingRoutes || applyingRoute) return;
+        if (!selectedRouteId) {
+            setActionMessage("Carregue as rotas e escolha uma delas para atualizar.");
+            if (routes.length === 0) void loadRoutes();
+            return;
+        }
+
+        const selectedRoute = routes.find(route => route.id === selectedRouteId);
+        if (!selectedRoute) {
+            setActionMessage("Escolha uma rota disponível antes de atualizar.");
+            return;
+        }
+
+        setBusyAction("refresh");
+        setApplyingRoute(true);
+        setActionMessage("");
+        try {
+            const result = await Native.applySelectedProtonRoute({ country: selectedRoute.country, serverId: selectedRoute.name }) as { success?: boolean; error?: string; message?: string };
+            if (result.success === false) throw new Error(result.error || result.message || "Não foi possível aplicar a rota.");
+            setActionMessage(`Rota atualizada: ${selectedRoute.country} · ${selectedRoute.city || selectedRoute.name}.`);
+            showToast(`Rota atualizada: ${selectedRoute.country} · ${selectedRoute.city || selectedRoute.name}.`, "success");
+            await refreshStatus();
+        } catch (error) {
+            const message = error instanceof Error ? error.message : String(error);
+            setActionMessage(`Atualização: ${message}`);
+            showToast(`Não foi possível atualizar a rota: ${message}`, "failure");
+        } finally {
+            setApplyingRoute(false);
+            setBusyAction(null);
+        }
+    };
+
+    const runScreenRecovery = async () => {
+        if (!Native || busyAction) return;
+        setBusyAction("screen");
+        setScreenRecoverySeconds(30);
+        setActionMessage("VPN desconectada. O Discord continua aberto e a conexão normal está sendo usada.");
+        autoEnablePaused = true;
+        try {
+            const stopped = await Native.shutdown(false) as { success?: boolean; error?: string; message?: string };
+            if (stopped.success === false) throw new Error(stopped.error || stopped.message || "Não foi possível desconectar a VPN.");
+            stopPresence();
+            updateRouteInfo(null, null, null, null);
+
+            for (let seconds = 30; seconds > 0; seconds--) {
+                setScreenRecoverySeconds(seconds);
+                await new Promise<void>(resolve => setTimeout(resolve, 1_000));
+            }
+
+            const enabled = await Native.enable(false) as { success?: boolean; error?: string; message?: string };
+            if (enabled.success === false) throw new Error(enabled.error || enabled.message || "Não foi possível reconectar a VPN.");
+            await refreshPresenceStatus();
+            setActionMessage("VPN reconectada. Teste a tela novamente.");
+            showToast("VPN reconectada depois da pausa de 30 segundos.", "success");
+        } catch (error) {
+            const message = error instanceof Error ? error.message : String(error);
+            setActionMessage(`Recuperação da tela: ${message}`);
+            showToast(`A VPN não conseguiu reconectar: ${message}`, "failure");
+        } finally {
+            autoEnablePaused = false;
+            setScreenRecoverySeconds(0);
+            setBusyAction(null);
+            await refreshStatus();
+        }
+    };
+
+    const statusLabel = status?.active
+        ? `VPN ativa${status.routeLabel ? ` · ${status.routeLabel}` : ""}`
+        : "Conexão normal do Discord";
+
+    const updateOptions = [
+        { label: "A cada 3 horas (padrão)", value: "3h" },
+        { label: "Uma vez por dia", value: "daily" },
+        { label: "Apenas ao iniciar o Discord", value: "startup" },
+    ];
+    const routeOptions = routes.length > 0
+        ? routes.map(route => {
+            const ping = typeof route.pingMs === "number" && Number.isFinite(route.pingMs) ? `${Math.round(route.pingMs)}ms` : "--ms";
+            const load = typeof route.load === "number" && Number.isFinite(route.load) ? ` · carga ${Math.round(route.load)}%` : "";
+            return {
+                label: `${ping} · ${route.country.toUpperCase()} · ${route.city || route.name}${load}`,
+                value: route.id,
+            };
+        })
+        : [{ label: loadingRoutes ? "Carregando rotas..." : "Clique em Carregar rotas", value: "__none__" }];
+    const quickBusy = busyAction !== null || loadingRoutes || applyingRoute;
+
+    return (
+        <div className="lefferzin-settings-page">
+            <div className="lefferzin-settings-page-heading">
+                <div>
+                    <h2>Menu rápido</h2>
+                    <p>Ações rápidas para rota, atividade e travamentos de tela.</p>
+                </div>
+                <span className="lefferzin-settings-page-badge">{statusLabel}</span>
+            </div>
+
+            <div className="lefferzin-settings-hint">
+                <strong>Conta ainda não conectada?</strong>
+                <span>Vá em Configurações → Plugins → Lefferzin Bypass para conectar sua conta Proton.</span>
+            </div>
+
+            <div className="lefferzin-quick-actions-grid">
+                <button
+                    type="button"
+                    className="lefferzin-quick-action"
+                    onClick={() => void runOptimize()}
+                    disabled={!Native || quickBusy}
+                >
+                    <strong>{busyAction === "optimize" ? "Otimizando rota..." : "Otimizar rota"}</strong>
+                    <span>Testa as opções e escolhe uma conexão mais rápida.</span>
+                </button>
+                <button
+                    type="button"
+                    className="lefferzin-quick-action lefferzin-quick-action-screen"
+                    onClick={() => void runScreenRecovery()}
+                    disabled={!Native || quickBusy}
+                >
+                    <strong>{screenRecoverySeconds > 0 ? `Aguardando ${screenRecoverySeconds}s...` : "Tela travando?"}</strong>
+                    <span>Se você estiver assistindo com a tela aberta, aperte o botão. Se você estiver fazendo tela, tente também; porém, provavelmente o problema é seu amigo.</span>
+                </button>
+            </div>
+
+            <div className="lefferzin-quick-route-card">
+                <div>
+                    <strong>Atualizar rota</strong>
+                    <span>Escolha uma rota disponível e aplique sem fechar o Discord.</span>
+                </div>
+                <SearchableSelect
+                    options={routeOptions}
+                    value={selectedRouteId ?? "__none__"}
+                    onChange={(value: string) => setSelectedRouteId(value === "__none__" ? null : value)}
+                    closeOnSelect
+                />
+                <div className="lefferzin-quick-route-actions">
+                    <button
+                        type="button"
+                        className="lefferzin-quick-route-button"
+                        onClick={() => void loadRoutes()}
+                        disabled={!Native || quickBusy}
+                    >
+                        {loadingRoutes ? "Carregando..." : "Carregar rotas"}
+                    </button>
+                    <button
+                        type="button"
+                        className="lefferzin-quick-route-button lefferzin-quick-route-button-primary"
+                        onClick={() => void runRefresh()}
+                        disabled={!Native || quickBusy || selectedRouteId == null}
+                    >
+                        {busyAction === "refresh" ? "Aplicando..." : "Atualizar rota"}
+                    </button>
+                </div>
+            </div>
+
+            <div className="lefferzin-settings-card">
+                <h3>Atalhos</h3>
+                <SettingsToggle
+                    label="Mostrar atividade no perfil"
+                    description="Liga ou desliga a atividade do Lefferzin Bypass no seu perfil."
+                    value={showActivity}
+                    onClick={() => { settings.store.showActivity = !showActivity; }}
+                />
+                <div>
+                    <Paragraph style={{ fontWeight: 600, marginBottom: "6px" }}>Frequência de atualização</Paragraph>
+                    <SearchableSelect
+                        options={updateOptions}
+                        value={updateFrequency}
+                        onChange={(value: string) => { settings.store.updateFrequency = value; }}
+                        closeOnSelect
+                    />
+                </div>
+                <SettingsToggle
+                    label="Acesso rápido na lateral"
+                    description="Mostra ou esconde o ícone do YaniNeko junto dos servidores."
+                    value={showSidebarConfig}
+                    onClick={() => { settings.store.showSidebarConfig = !showSidebarConfig; }}
+                />
+            </div>
+
+            {actionMessage && <Paragraph role="status" aria-live="polite">{actionMessage}</Paragraph>}
+        </div>
+    );
+}
+
+function SettingsWorkspace({ modalProps }: { modalProps: any; }) {
+    return (
+        <Modal {...modalProps} size="lg" title="Acesso rápido YaniNeko">
+            <div className="lefferzin-settings-workspace">
+                <header className="lefferzin-quick-window-header">
+                    <div className="lefferzin-quick-window-title">
+                        <div className="lefferzin-quick-window-logo">
+                            <MainSettingsIcon width={22} height={22} />
+                        </div>
+                        <div>
+                            <strong>Acesso rápido YaniNeko</strong>
+                            <p>Controles rápidos do bypass</p>
+                        </div>
+                    </div>
+                    <span className="lefferzin-settings-version">LOCAL</span>
+                </header>
+
+                <div className="lefferzin-quick-window-body">
+                    <QuickMenuSettings />
+                </div>
+            </div>
+        </Modal>
+    );
+}
+
+function openSettingsWorkspace(): void {
+    openModal(modalProps => <SettingsWorkspace modalProps={modalProps} />);
+}
+
+const plugin = definePlugin({
     name: "LefferzinBypass",
     enabledByDefault: true,
     description: "Libera a transmissão de tela e a câmera em contas bloqueadas usando uma VPN da Proton só para o Discord, sem mexer na internet do resto do PC.",
     authors: [{ name: "L3ffer_", id: 406595579603451914n }],
     tags: ["Voz", "Privacidade"],
+    dependencies: ["ServerListAPI"],
     settings,
     settingsAboutComponent: AboutPlugin,
 
@@ -1364,6 +1824,8 @@ export default definePlugin({
     },
 
     start() {
+        settingsPlugin = plugin;
+        setSettingsServerVisibility(settings.store.showSidebarConfig !== false);
         lastVpnNotification = null;
         syncReportUsername();
         setPresenceEnabled(settings.store.showActivity !== false);
@@ -1382,6 +1844,11 @@ export default definePlugin({
     },
 
     stop() {
+        if (settingsServerRegistered) {
+            removeServerListElement(ServerListRenderPosition.In, SettingsServer);
+            settingsServerRegistered = false;
+        }
+        settingsPlugin = undefined;
         pluginRunning = false;
         pluginGeneration++;
         discordGatewayConnected = false;
@@ -1404,3 +1871,5 @@ export default definePlugin({
         Native?.shutdown(false).catch(error => recordError("shutdown do WireSock falhou", error));
     }
 });
+
+export default plugin;

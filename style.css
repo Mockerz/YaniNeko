@@ -1,0 +1,535 @@
+.lefferzin-settings-server {
+    align-items: center;
+    background: var(--background-secondary);
+    border: 0;
+    border-radius: 16px;
+    color: var(--interactive-normal);
+    cursor: pointer;
+    display: flex;
+    height: 48px;
+    justify-content: center;
+    margin: 8px auto;
+    padding: 0;
+    transition: background-color 150ms ease, border-radius 150ms ease, color 150ms ease;
+    width: 48px;
+}
+
+.lefferzin-settings-server:hover {
+    background: var(--brand-500);
+    border-radius: 16px;
+    color: var(--white-500);
+}
+
+.lefferzin-settings-server:focus-visible {
+    outline: 2px solid var(--focus-primary);
+    outline-offset: 2px;
+}
+
+.lefferzin-settings-server:active {
+    transform: translateY(1px);
+}
+
+.lefferzin-settings-workspace {
+    background: var(--background-primary);
+    border: 1px solid var(--background-modifier-accent);
+    border-radius: 10px;
+    display: block;
+    max-height: 70vh;
+    overflow: auto;
+}
+
+.lefferzin-quick-window-header {
+    align-items: center;
+    border-bottom: 1px solid var(--background-modifier-accent);
+    display: flex;
+    justify-content: space-between;
+    padding: 18px 20px;
+}
+
+.lefferzin-quick-window-title {
+    align-items: center;
+    display: flex;
+    gap: 11px;
+}
+
+.lefferzin-quick-window-title strong,
+.lefferzin-quick-window-title p {
+    display: block;
+    margin: 0;
+}
+
+.lefferzin-quick-window-title strong {
+    color: var(--header-primary);
+    font-size: 16px;
+}
+
+.lefferzin-quick-window-title p {
+    color: var(--text-muted);
+    font-size: 12px;
+    margin-top: 3px;
+}
+
+.lefferzin-quick-window-logo {
+    align-items: center;
+    background: var(--brand-500);
+    border-radius: 10px;
+    color: var(--white-500);
+    display: flex;
+    height: 38px;
+    justify-content: center;
+    width: 38px;
+}
+
+.lefferzin-quick-window-body {
+    padding: 20px;
+}
+
+.lefferzin-settings-sidebar {
+    background: var(--background-secondary-alt);
+    display: flex;
+    flex: 0 0 220px;
+    flex-direction: column;
+    padding: 16px 10px 10px;
+}
+
+.lefferzin-settings-sidebar-header {
+    align-items: center;
+    display: flex;
+    gap: 10px;
+    margin: 2px 8px 24px;
+}
+
+.lefferzin-settings-sidebar-header strong,
+.lefferzin-settings-sidebar-header span {
+    display: block;
+}
+
+.lefferzin-settings-sidebar-header strong {
+    color: var(--header-primary);
+    font-size: 15px;
+}
+
+.lefferzin-settings-sidebar-header span {
+    color: var(--text-muted);
+    font-size: 12px;
+    margin-top: 2px;
+}
+
+.lefferzin-settings-sidebar-icon {
+    align-items: center;
+    background: var(--brand-500);
+    border-radius: 12px;
+    color: var(--white-500);
+    display: flex;
+    height: 36px;
+    justify-content: center;
+    width: 36px;
+}
+
+.lefferzin-settings-sidebar-controls {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    margin-bottom: 20px;
+}
+
+.lefferzin-settings-support {
+    align-items: center;
+    background: var(--background-secondary);
+    border-radius: 6px;
+    color: var(--interactive-normal);
+    display: flex;
+    font-size: 12px;
+    gap: 8px;
+    padding: 8px 10px;
+    text-decoration: none;
+    transition: background-color 120ms ease, color 120ms ease;
+}
+
+.lefferzin-settings-support:hover {
+    background: var(--background-modifier-hover);
+    color: var(--interactive-hover);
+}
+
+.lefferzin-settings-support-icon {
+    align-items: center;
+    background: var(--brand-500);
+    border-radius: 50%;
+    color: var(--white-500);
+    display: flex;
+    font-size: 11px;
+    font-weight: 700;
+    height: 18px;
+    justify-content: center;
+    width: 18px;
+}
+
+.lefferzin-settings-toggle {
+    align-items: center;
+    background: var(--background-secondary);
+    border: 1px solid var(--background-modifier-accent);
+    border-radius: 8px;
+    color: var(--interactive-normal);
+    cursor: pointer;
+    display: flex;
+    gap: 12px;
+    justify-content: space-between;
+    padding: 12px;
+    text-align: left;
+    transition: background-color 120ms ease, border-color 120ms ease, color 120ms ease;
+    width: 100%;
+}
+
+.lefferzin-settings-sidebar-controls .lefferzin-settings-toggle {
+    border-radius: 6px;
+    padding: 8px 10px;
+}
+
+.lefferzin-settings-toggle:hover {
+    background: var(--background-modifier-hover);
+    color: var(--interactive-hover);
+}
+
+.lefferzin-settings-toggle-copy {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    min-width: 0;
+}
+
+.lefferzin-settings-toggle-copy strong {
+    color: var(--header-primary);
+    font-size: 13px;
+}
+
+.lefferzin-settings-toggle-copy small {
+    color: var(--text-muted);
+    font-size: 12px;
+    line-height: 1.4;
+}
+
+.lefferzin-settings-toggle-state {
+    border-radius: 4px;
+    flex: 0 0 auto;
+    font-size: 10px;
+    font-weight: 800;
+    letter-spacing: 0.04em;
+    padding: 4px 6px;
+}
+
+.lefferzin-settings-toggle-on {
+    border-color: color-mix(in srgb, var(--status-positive) 45%, var(--background-modifier-accent));
+}
+
+.lefferzin-settings-toggle-on .lefferzin-settings-toggle-state {
+    background: color-mix(in srgb, var(--status-positive) 20%, transparent);
+    color: var(--text-positive);
+}
+
+.lefferzin-settings-toggle-off {
+    border-color: color-mix(in srgb, var(--status-danger) 45%, var(--background-modifier-accent));
+}
+
+.lefferzin-settings-toggle-off .lefferzin-settings-toggle-state {
+    background: color-mix(in srgb, var(--status-danger) 20%, transparent);
+    color: var(--text-danger);
+}
+
+.lefferzin-settings-category {
+    color: var(--text-muted);
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    margin: 0 8px 8px;
+}
+
+.lefferzin-settings-nav {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+}
+
+.lefferzin-settings-nav-item {
+    align-items: center;
+    background: transparent;
+    border: 0;
+    border-radius: 6px;
+    color: var(--interactive-normal);
+    cursor: pointer;
+    display: flex;
+    font-size: 13px;
+    gap: 9px;
+    padding: 9px 10px;
+    text-align: left;
+    transition: background-color 120ms ease, color 120ms ease;
+    width: 100%;
+}
+
+.lefferzin-settings-nav-item:hover {
+    background: var(--background-modifier-hover);
+    color: var(--interactive-hover);
+}
+
+.lefferzin-settings-nav-item-active {
+    background: var(--background-modifier-selected);
+    color: var(--interactive-active);
+    font-weight: 600;
+}
+
+.lefferzin-settings-nav-icon {
+    align-items: center;
+    color: var(--text-muted);
+    display: flex;
+    font-size: 17px;
+    height: 18px;
+    justify-content: center;
+    width: 18px;
+}
+
+.lefferzin-settings-nav-item-active .lefferzin-settings-nav-icon {
+    color: var(--brand-500);
+}
+
+.lefferzin-settings-sidebar-footer {
+    border-top: 1px solid var(--background-modifier-accent);
+    color: var(--text-muted);
+    font-size: 11px;
+    margin-top: auto;
+    padding: 12px 8px 2px;
+}
+
+.lefferzin-settings-content {
+    display: flex;
+    flex: 1;
+    flex-direction: column;
+    min-width: 0;
+}
+
+.lefferzin-settings-content-header {
+    align-items: center;
+    border-bottom: 1px solid var(--background-modifier-accent);
+    display: flex;
+    justify-content: space-between;
+    padding: 18px 24px 14px;
+}
+
+.lefferzin-settings-channel-name {
+    color: var(--header-primary);
+    font-size: 16px;
+    font-weight: 700;
+}
+
+.lefferzin-settings-content-header p {
+    color: var(--text-muted);
+    font-size: 12px;
+    margin: 4px 0 0;
+}
+
+.lefferzin-settings-version,
+.lefferzin-settings-page-badge {
+    border: 1px solid var(--background-modifier-accent);
+    border-radius: 4px;
+    color: var(--text-muted);
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.05em;
+    padding: 4px 6px;
+}
+
+.lefferzin-settings-content-scroll {
+    flex: 1;
+    min-height: 0;
+    overflow: auto;
+    padding: 24px;
+}
+
+.lefferzin-settings-page {
+    display: flex;
+    flex-direction: column;
+    gap: 18px;
+}
+
+.lefferzin-settings-page-heading {
+    align-items: flex-start;
+    display: flex;
+    justify-content: space-between;
+}
+
+.lefferzin-settings-page-heading h2 {
+    color: var(--header-primary);
+    font-size: 22px;
+    margin: 0;
+}
+
+.lefferzin-settings-page-heading p,
+.lefferzin-settings-card p {
+    color: var(--text-muted);
+    font-size: 13px;
+    line-height: 1.5;
+    margin: 6px 0 0;
+}
+
+.lefferzin-settings-card {
+    background: var(--background-secondary);
+    border: 1px solid var(--background-modifier-accent);
+    border-radius: 10px;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    padding: 18px;
+}
+
+.lefferzin-settings-card h3 {
+    color: var(--header-primary);
+    font-size: 16px;
+    margin: 0;
+}
+
+.lefferzin-settings-hint {
+    background: color-mix(in srgb, var(--brand-500) 10%, var(--background-secondary));
+    border: 1px solid color-mix(in srgb, var(--brand-500) 35%, var(--background-modifier-accent));
+    border-radius: 8px;
+    color: var(--text-muted);
+    display: flex;
+    flex-direction: column;
+    font-size: 12px;
+    gap: 4px;
+    line-height: 1.4;
+    padding: 11px 13px;
+}
+
+.lefferzin-settings-hint strong {
+    color: var(--header-primary);
+    font-size: 13px;
+}
+
+.lefferzin-quick-actions-grid {
+    display: grid;
+    gap: 10px;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.lefferzin-quick-route-card {
+    background: var(--background-secondary);
+    border: 1px solid var(--background-modifier-accent);
+    border-radius: 10px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    padding: 15px;
+}
+
+.lefferzin-quick-route-card strong,
+.lefferzin-quick-route-card span {
+    display: block;
+}
+
+.lefferzin-quick-route-card strong {
+    color: var(--header-primary);
+    font-size: 14px;
+}
+
+.lefferzin-quick-route-card span {
+    color: var(--text-muted);
+    font-size: 12px;
+    line-height: 1.45;
+    margin-top: 4px;
+}
+
+.lefferzin-quick-route-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+
+.lefferzin-quick-route-button {
+    background: var(--background-tertiary);
+    border: 1px solid var(--background-modifier-accent);
+    border-radius: 6px;
+    color: var(--interactive-normal);
+    cursor: pointer;
+    font-size: 12px;
+    font-weight: 600;
+    padding: 8px 11px;
+    transition: background-color 120ms ease, border-color 120ms ease, color 120ms ease, opacity 120ms ease;
+}
+
+.lefferzin-quick-route-button:disabled {
+    cursor: not-allowed;
+    opacity: 0.5;
+}
+
+.lefferzin-quick-route-button:hover:not(:disabled) {
+    background: var(--background-modifier-hover);
+    border-color: var(--brand-500);
+    color: var(--interactive-hover);
+}
+
+.lefferzin-quick-route-button-primary {
+    background: var(--brand-500);
+    border-color: var(--brand-500);
+    color: var(--white-500);
+}
+
+.lefferzin-quick-action {
+    align-items: flex-start;
+    background: var(--background-secondary);
+    border: 1px solid var(--background-modifier-accent);
+    border-radius: 10px;
+    color: var(--interactive-normal);
+    cursor: pointer;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    min-height: 92px;
+    padding: 15px;
+    text-align: left;
+    transition: background-color 120ms ease, border-color 120ms ease, color 120ms ease, opacity 120ms ease;
+}
+
+.lefferzin-quick-action:disabled {
+    cursor: not-allowed;
+    opacity: 0.52;
+}
+
+.lefferzin-quick-action:hover:not(:disabled) {
+    background: var(--background-modifier-hover);
+    border-color: var(--brand-500);
+    color: var(--interactive-hover);
+}
+
+.lefferzin-quick-action strong {
+    color: var(--header-primary);
+    font-size: 14px;
+}
+
+.lefferzin-quick-action span {
+    color: var(--text-muted);
+    font-size: 12px;
+    line-height: 1.45;
+}
+
+.lefferzin-quick-action-screen:disabled {
+    background: var(--background-tertiary);
+    border-color: var(--background-modifier-accent);
+}
+
+.lefferzin-settings-sidebar-controls .lefferzin-settings-toggle-copy strong {
+    font-size: 12px;
+}
+
+@media (width <= 560px) {
+    .lefferzin-quick-actions-grid {
+        grid-template-columns: 1fr;
+    }
+}
+
+@media (width <= 700px) {
+    .lefferzin-settings-sidebar {
+        flex-basis: 180px;
+    }
+
+    .lefferzin-settings-content-scroll {
+        padding: 16px;
+    }
+}
