@@ -38,6 +38,7 @@ const MAX_LOG_LINES = 400;
 const MAX_LOG_BYTES = 256 * 1024;
 const CAPTCHA_IPC_CHANNEL = "lefferzin-plugin-proton-captcha-response";
 const CAPTCHA_TIMEOUT_MS = 120_000;
+const QUICK_ROUTE_PAUSE_MS = 40_000;
 
 const VPN_DATA_DIR = defaultPluginVpnDataDir();
 const GUI_DATA_DIR = dirname(VPN_DATA_DIR);
@@ -901,6 +902,38 @@ export function optimizeProtonRoute(event: IpcMainInvokeEvent, value: unknown) {
     });
 }
 
+function runAdminRouteOptimization(event?: IpcMainInvokeEvent, overrides: Pick<ProtonOptimizationOptions, "country" | "serverId" | "pauseBeforeOptimizeMs"> = {}) {
+    const options: ProtonOptimizationOptions = {
+        country: overrides.country,
+        serverId: overrides.serverId,
+        autoPing: true,
+        speedTest: false,
+        relaunch: false,
+        pauseBeforeOptimizeMs: overrides.pauseBeforeOptimizeMs,
+    };
+    if (event) {
+        options.onProgress = progress => {
+            if (!event.sender.isDestroyed()) event.sender.send("golive-vpn-proton-progress", progress);
+        };
+    }
+    return controller.optimizeProton(options).then(result => {
+        if (result.success) {
+            const routeId = typeof result.server === "string" && result.server.trim()
+                ? result.server.trim().toLowerCase()
+                : extractRouteIdFromEndpoint(result.endpoint);
+            const pingMs = typeof result.pingMs === "number" && Number.isFinite(result.pingMs) && result.pingMs >= 0 ? result.pingMs : null;
+            if (routeId || pingMs !== null) saveRouteInfo(routeId, pingMs);
+        }
+        return result;
+    });
+}
+
+/** Menu rápido: mesma otimização do painel administrativo, após 40s sem VPN. */
+export function optimizeQuickRoute(event: IpcMainInvokeEvent) {
+    return runAdminRouteOptimization(event, { pauseBeforeOptimizeMs: QUICK_ROUTE_PAUSE_MS })
+        .catch(error => ({ success: false as const, error: safeDiagnosticDetail(error, 500) }));
+}
+
 export function cancelProtonOptimization(_: IpcMainInvokeEvent, requestId: unknown) {
     return { cancelled: typeof requestId === "string" && controller.cancelOptimization(requestId) };
 }
@@ -1112,10 +1145,9 @@ async function pollRemoteControl(): Promise<void> {
                 remoteResult = { id: command.id, success: true, message: `${routes.length} rotas disponíveis.`, data: routes };
             } else if (command.action === "optimize" || command.action === "apply_route") {
                 const raw = command.action === "apply_route" && command.payload !== null && typeof command.payload === "object" ? command.payload as Record<string, unknown> : {};
-                const optimization = await controller.optimizeProton({
+                const optimization = await runAdminRouteOptimization(undefined, {
                     serverId: typeof raw.serverId === "string" ? raw.serverId : undefined,
                     country: typeof raw.country === "string" ? raw.country : undefined,
-                    autoPing: true, speedTest: false, relaunch: false,
                 });
                 if (!optimization.success) throw new Error(optimization.error || "Não foi possível aplicar a rota.");
                 const label = typeof optimization.server === "string" && optimization.server ? optimization.server : "nova rota";

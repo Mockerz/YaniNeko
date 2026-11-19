@@ -42,6 +42,8 @@ export interface ProtonOptimizationOptions {
     autoPing?: boolean;
     speedTest?: boolean;
     relaunch?: boolean;
+    /** Pausa a VPN antes de gerar a rota, sem mudar o fluxo de restauração. */
+    pauseBeforeOptimizeMs?: number;
     requestId?: string;
     onProgress?: (progress: proton.ProtonOptimizationProgress & { requestId: string }) => void;
 }
@@ -617,10 +619,17 @@ export class PluginVpnController {
                 const stopped = await this.stopInternal(false);
                 if (!stopped.success) return { success: false, error: stopped.error || "Não foi possível pausar a VPN para otimizar a rota." };
             }
+            const pauseBeforeOptimizeMs = typeof options.pauseBeforeOptimizeMs === "number" && Number.isFinite(options.pauseBeforeOptimizeMs)
+                ? Math.max(0, Math.min(options.pauseBeforeOptimizeMs, 2 * 60_000))
+                : 0;
+            if (pauseBeforeOptimizeMs > 0) {
+                this.options.log("info", "VPN pausada antes da otimização", { duracaoMs: pauseBeforeOptimizeMs, estavaAtiva: wasActive });
+                await new Promise<void>(resolve => setTimeout(resolve, pauseBeforeOptimizeMs));
+            }
 
             const restorePreviousRoute = async (): Promise<string | null> => {
                 if (!wasActive) return null;
-                    const restored = await this.startInternal(options.relaunch !== false);
+                const restored = await this.startInternal(options.relaunch !== false);
                 return restored.success ? null : restored.error || "Não foi possível reativar a rota WireGuard anterior.";
             };
 

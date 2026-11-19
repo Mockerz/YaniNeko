@@ -1489,18 +1489,16 @@ function BypassSettings() {
 }
 
 function QuickMenuSettings() {
-    const { showActivity, showSidebarConfig, sidebarButtonColor, updateFrequency, protonCountry, protonFreeOnly, protonAutoPing } = settings.use([
+    const { showActivity, showSidebarConfig, sidebarButtonColor, updateFrequency } = settings.use([
         "showActivity",
         "showSidebarConfig",
         "sidebarButtonColor",
         "updateFrequency",
-        "protonCountry",
-        "protonFreeOnly",
-        "protonAutoPing",
     ]);
     const [status, setStatus] = useState<PluginVpnStatus | null>(null);
     const [busyAction, setBusyAction] = useState<"optimize" | "refresh" | "screen" | null>(null);
     const [screenRecoverySeconds, setScreenRecoverySeconds] = useState(0);
+    const [routePauseSeconds, setRoutePauseSeconds] = useState(0);
     const [actionMessage, setActionMessage] = useState("");
     const [routes, setRoutes] = useState<ProtonRouteEntry[]>([]);
     const [selectedRouteId, setSelectedRouteId] = useState<string | null>(null);
@@ -1548,26 +1546,29 @@ function QuickMenuSettings() {
     const runOptimize = async () => {
         if (!Native || busyAction) return;
         setBusyAction("optimize");
+        setRoutePauseSeconds(40);
         setActionMessage("");
+        autoEnablePaused = true;
+        const pauseTimer = setInterval(() => setRoutePauseSeconds(seconds => Math.max(0, seconds - 1)), 1_000);
         try {
-            const result = await Native.optimizeProtonRoute({
-                requestId: `quick-${Date.now()}`,
-                speedTest: true,
-                country: protonCountry,
-                freeOnly: protonFreeOnly,
-                autoPing: protonAutoPing,
-            }) as { success?: boolean; selectedServer?: string; server?: string; error?: string; message?: string };
+            setActionMessage("VPN desligada por 40 segundos. O Discord continua aberto; depois a rota será otimizada.");
+            const result = await Native.optimizeQuickRoute() as { success?: boolean; selectedServer?: string; server?: string; error?: string; message?: string };
             if (result.success === false) throw new Error(result.error || result.message || "Não foi possível otimizar a rota.");
             const route = result.selectedServer || result.server || "uma rota alternativa";
-            setActionMessage(`Rota otimizada: ${route}.`);
-            showToast(`Rota otimizada: ${route}.`, "success");
+            setActionMessage(`Rota otimizada: ${route}. Discord continua aberto.`);
+            showToast(`Rota otimizada: ${route}. Discord continua aberto.`, "success");
+            await refreshPresenceStatus();
             await refreshStatus();
         } catch (error) {
             const message = error instanceof Error ? error.message : String(error);
             setActionMessage(`Otimização: ${message}`);
             showToast(`Não foi possível otimizar a rota: ${message}`, "failure");
         } finally {
+            clearInterval(pauseTimer);
+            autoEnablePaused = false;
+            setRoutePauseSeconds(0);
             setBusyAction(null);
+            await refreshStatus();
         }
     };
 
@@ -1687,8 +1688,10 @@ function QuickMenuSettings() {
                     onClick={() => void runOptimize()}
                     disabled={!Native || quickBusy}
                 >
-                    <strong>{busyAction === "optimize" ? "Otimizando rota..." : "Otimizar rota"}</strong>
-                    <span>Testa as opções e escolhe uma conexão mais rápida.</span>
+                    <strong>{busyAction === "optimize"
+                        ? routePauseSeconds > 0 ? `VPN desligada · ${routePauseSeconds}s` : "Otimizando rota..."
+                        : "Otimizar rota"}</strong>
+                    <span>Desliga a VPN por 40 segundos, usa a mesma otimização do painel admin e mantém o Discord aberto.</span>
                 </button>
                 <button
                     type="button"
