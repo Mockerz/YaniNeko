@@ -460,6 +460,28 @@ export function protonSessionFile(dataDir: string): string {
     return path.join(dataDir, "proton-session.json");
 }
 
+function commitSessionFile(source: string, target: string): void {
+    const previous = `${target}.${process.pid}.${randomUUID()}.previous`;
+    let movedPrevious = false;
+    try {
+        if (fs.existsSync(target)) {
+            fs.renameSync(target, previous);
+            movedPrevious = true;
+        }
+        fs.renameSync(source, target);
+        if (movedPrevious) fs.rmSync(previous, { force: true });
+    } catch (error) {
+        try { fs.rmSync(target, { force: true }); } catch {}
+        if (movedPrevious) {
+            try { if (fs.existsSync(previous)) fs.renameSync(previous, target); } catch {}
+        }
+        throw error;
+    } finally {
+        try { fs.rmSync(source, { force: true }); } catch {}
+        try { fs.rmSync(previous, { force: true }); } catch {}
+    }
+}
+
 export function savedSessionUsername(dataDir: string): string {
     try {
         const value = JSON.parse(fs.readFileSync(protonSessionFile(dataDir), "utf8")) as { username?: unknown };
@@ -529,27 +551,46 @@ export async function loginProton(
 ): Promise<ProtonLoginResult> {
     if (!username.trim()) return { success: false, code: "CONFIGURATION_ERROR", message: "Informe o usuário Proton.", retryable: false };
     ensureDataDir(dataDir);
+    const sessionFile = protonSessionFile(dataDir);
+    const loginSessionFile = `${sessionFile}.${process.pid}.${randomUUID()}.tmp`;
     // O helper pode reaproveitar uma sessão antiga antes de tentar a senha.
     // Limpar e forçar a renovação evita que uma sessão expirada seja reportada
     // como se o usuário tivesse digitado a senha errada, inclusive no primeiro
     // login após uma reinstalação que restaurou um backup local.
-    const args = ["-username", username.trim(), "-session-file", protonSessionFile(dataDir), "-clear-session", "-force-refresh", "-login-only", "-json"];
+    // O login usa um arquivo temporário: uma tentativa recusada nunca pode
+    // deixar um proton-session.json parcial para a próxima ativação.
+    const args = ["-username", username.trim(), "-session-file", loginSessionFile, "-clear-session", "-force-refresh", "-login-only", "-json"];
     if (password) args.push("-password", password);
     if (twoFactorCode) args.push("-2fa", twoFactorCode);
     if (humanVerificationToken) args.push("-hv-token", humanVerificationToken);
     try {
         const result = await runConfgen({ args, timeoutMs: 25_000, log });
-        if (result.json?.success === true) return { success: true, username: typeof result.json.username === "string" ? result.json.username.trim() : username.trim(), message: "Autenticação Proton concluída." };
+        if (result.json?.success === true) {
+            if (!fs.existsSync(loginSessionFile)) {
+                return { success: false, code: "SESSION_PERSISTENCE", message: "O Proton autenticou, mas não salvou a sessão local.", error: "O Proton autenticou, mas não salvou a sessão local.", retryable: true };
+            }
+            try {
+                commitSessionFile(loginSessionFile, sessionFile);
+            } catch (error) {
+                const detail = logError(error);
+                log?.("error", "falha ao salvar sessão Proton após login", { erro: detail });
+                return { success: false, code: "SESSION_PERSISTENCE", message: "O Proton autenticou, mas não foi possível salvar a sessão local.", error: detail, retryable: true };
+            }
+            return { success: true, username: typeof result.json.username === "string" ? result.json.username.trim() : username.trim(), message: "Autenticação Proton concluída." };
+        }
         const code = result.json?.code;
         if (code === "CAPTCHA_REQUIRED" || code === "CAPTCHA_INVALID") {
             return { success: false, code, message: typeof result.json?.error === "string" ? result.json.error : "O Proton solicitou uma verificação de segurança.", retryable: result.json?.retryable !== false, captchaUrl: typeof result.json?.captchaUrl === "string" ? parseCaptchaUrl(result.json.captchaUrl)?.url : undefined };
         }
         const classified = classifyProtonError(result.json?.error || result.stderr || result.stdout);
+        log?.("warn", "login Proton recusado", { codigo: classified.code, erro: classified.message });
         return { success: false, ...classified, error: classified.message };
     } catch (error) {
         const classified = classifyProtonError(error);
         log?.("error", "falha ao executar login Proton", { codigo: classified.code, erro: logError(error) });
         return { success: false, ...classified, error: classified.message };
+    } finally {
+        try { fs.rmSync(loginSessionFile, { force: true }); } catch {}
     }
 }
 

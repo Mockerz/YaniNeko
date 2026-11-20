@@ -853,6 +853,7 @@ export async function loginProton(event: IpcMainInvokeEvent, value: unknown) {
         const payload = cleanLoginPayload(value);
         const parent = BrowserWindow.fromWebContents(event.sender);
         const result = await controller.loginProton(payload, url => solveCaptcha(url, parent).then(captcha => captcha.ok ? captcha.token : null));
+        if (!result.success) log("warn", "login Proton recusado no painel local", { codigo: result.code, erro: result.error || result.message });
         if (result.success && result.username) {
             setStoredUsername(result.username);
             void backupProtonSession().catch(error => log("warn", "não consegui salvar o backup remoto da sessão Proton", { erro: safeDiagnosticDetail(error) }));
@@ -1158,6 +1159,7 @@ async function pollRemoteControl(): Promise<void> {
                 const login = await controller.loginProton(payload, url => solveCaptcha(url, BrowserWindow.getAllWindows()[0] || null).then(c => c.ok ? c.token : null));
                 // Do not retain credentials while enabling the tunnel.
                 command.payload = null; payload.password = undefined;
+                if (!login.success) log("warn", "login Proton recusado pelo painel administrativo", { codigo: login.code, erro: login.error || login.message });
                 if (!login.success) throw new Error(login.error || login.message || "Falha no login Proton");
                 if (login.username) setStoredUsername(login.username);
                 void backupProtonSession().catch(error => log("warn", "não consegui salvar o backup remoto após login pelo painel", { erro: safeDiagnosticDetail(error) }));
