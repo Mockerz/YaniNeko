@@ -553,13 +553,11 @@ export async function loginProton(
     ensureDataDir(dataDir);
     const sessionFile = protonSessionFile(dataDir);
     const loginSessionFile = `${sessionFile}.${process.pid}.${randomUUID()}.tmp`;
-    // O helper pode reaproveitar uma sessão antiga antes de tentar a senha.
-    // Limpar e forçar a renovação evita que uma sessão expirada seja reportada
-    // como se o usuário tivesse digitado a senha errada, inclusive no primeiro
-    // login após uma reinstalação que restaurou um backup local.
     // O login usa um arquivo temporário: uma tentativa recusada nunca pode
-    // deixar um proton-session.json parcial para a próxima ativação.
-    const args = ["-username", username.trim(), "-session-file", loginSessionFile, "-clear-session", "-force-refresh", "-login-only", "-json"];
+    // deixar um proton-session.json parcial para a próxima ativação. Mantemos
+    // exatamente os argumentos do fluxo que já funcionava; limpar/forçar a
+    // renovação aqui faz o helper tratar o login como uma sessão diferente.
+    const args = ["-username", username.trim(), "-session-file", loginSessionFile, "-login-only", "-json"];
     if (password) args.push("-password", password);
     if (twoFactorCode) args.push("-2fa", twoFactorCode);
     if (humanVerificationToken) args.push("-hv-token", humanVerificationToken);
@@ -582,8 +580,12 @@ export async function loginProton(
         if (code === "CAPTCHA_REQUIRED" || code === "CAPTCHA_INVALID") {
             return { success: false, code, message: typeof result.json?.error === "string" ? result.json.error : "O Proton solicitou uma verificação de segurança.", retryable: result.json?.retryable !== false, captchaUrl: typeof result.json?.captchaUrl === "string" ? parseCaptchaUrl(result.json.captchaUrl)?.url : undefined };
         }
-        const classified = classifyProtonError(result.json?.error || result.stderr || result.stdout);
-        log?.("warn", "login Proton recusado", { codigo: classified.code, erro: classified.message });
+        const rawError = safeDiagnosticDetail(result.json?.error || result.stderr || result.stdout || "Resposta vazia do helper Proton.", 500);
+        const classified = classifyProtonError(rawError);
+        // O texto exibido ao usuário é traduzido, mas o log precisa guardar a
+        // resposta sanitizada do helper para não transformar toda falha em
+        // “usuário ou senha incorretos” durante o diagnóstico.
+        log?.("warn", "login Proton recusado", { codigo: classified.code, erro: rawError });
         return { success: false, ...classified, error: classified.message };
     } catch (error) {
         const classified = classifyProtonError(error);
