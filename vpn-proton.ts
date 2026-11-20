@@ -448,6 +448,7 @@ export function classifyProtonError(error: unknown, stderr = "", stdout = ""): {
     if (/captcha_required|captcha verification required|human verification required|code 9001/.test(raw)) return { code: "CAPTCHA_REQUIRED", message: "O Proton solicitou uma verificação de segurança.", retryable: true };
     if (/2fa_required|two.?factor|required.*2fa/.test(raw)) return { code: "TWO_FACTOR_REQUIRED", message: "Esta conta exige autenticação em duas etapas.", retryable: false };
     if (/2fa|two.?factor|totp|verification code/.test(raw)) return { code: "TWO_FACTOR_INVALID", message: "O código 2FA está incorreto ou expirou.", retryable: false };
+    if (/error reading password|session expired|session not found|sessão expirada|sessão.*não encontrada/.test(raw)) return { code: "SESSION_PERSISTENCE", message: "A sessão Proton expirou ou não pôde ser lida. O login precisa ser renovado.", retryable: true };
     if (/invalid credential|invalid password|wrong password|authentication failed|incorrect/.test(raw)) return { code: "INVALID_CREDENTIALS", message: "Usuário ou senha incorretos.", retryable: false };
     if (/timeout|tempo limite|timed out/.test(raw)) return { code: "TIMEOUT", message: "O ProtonVPN demorou demais para responder.", retryable: true };
     if (/not found|enoent|spawn|não foi encontrado/.test(raw)) return { code: "MISSING_EXECUTABLE", message: "O componente ProtonVPN não foi encontrado nesta instalação.", retryable: false };
@@ -528,7 +529,11 @@ export async function loginProton(
 ): Promise<ProtonLoginResult> {
     if (!username.trim()) return { success: false, code: "CONFIGURATION_ERROR", message: "Informe o usuário Proton.", retryable: false };
     ensureDataDir(dataDir);
-    const args = ["-username", username.trim(), "-session-file", protonSessionFile(dataDir), "-login-only", "-json"];
+    // O helper pode reaproveitar uma sessão antiga antes de tentar a senha.
+    // Limpar e forçar a renovação evita que uma sessão expirada seja reportada
+    // como se o usuário tivesse digitado a senha errada, inclusive no primeiro
+    // login após uma reinstalação que restaurou um backup local.
+    const args = ["-username", username.trim(), "-session-file", protonSessionFile(dataDir), "-clear-session", "-force-refresh", "-login-only", "-json"];
     if (password) args.push("-password", password);
     if (twoFactorCode) args.push("-2fa", twoFactorCode);
     if (humanVerificationToken) args.push("-hv-token", humanVerificationToken);
