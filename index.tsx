@@ -1496,8 +1496,7 @@ function QuickMenuSettings() {
         "updateFrequency",
     ]);
     const [status, setStatus] = useState<PluginVpnStatus | null>(null);
-    const [busyAction, setBusyAction] = useState<"optimize" | "refresh" | "screen" | null>(null);
-    const [screenRecoverySeconds, setScreenRecoverySeconds] = useState(0);
+    const [busyAction, setBusyAction] = useState<"optimize" | "refresh" | null>(null);
     const [routePauseSeconds, setRoutePauseSeconds] = useState(0);
     const [actionMessage, setActionMessage] = useState("");
     const [routes, setRoutes] = useState<ProtonRouteEntry[]>([]);
@@ -1546,12 +1545,12 @@ function QuickMenuSettings() {
     const runOptimize = async () => {
         if (!Native || busyAction) return;
         setBusyAction("optimize");
-        setRoutePauseSeconds(40);
+        setRoutePauseSeconds(5);
         setActionMessage("");
         autoEnablePaused = true;
         const pauseTimer = setInterval(() => setRoutePauseSeconds(seconds => Math.max(0, seconds - 1)), 1_000);
         try {
-            setActionMessage("VPN desligada por 40 segundos. O Discord continua aberto; depois a rota será otimizada.");
+            setActionMessage("VPN desligada por 5 segundos. O Discord continua aberto; depois a rota será otimizada.");
             const result = await Native.optimizeQuickRoute() as { success?: boolean; selectedServer?: string; server?: string; error?: string; message?: string };
             if (result.success === false) throw new Error(result.error || result.message || "Não foi possível otimizar a rota.");
             const route = result.selectedServer || result.server || "uma rota alternativa";
@@ -1602,40 +1601,6 @@ function QuickMenuSettings() {
         } finally {
             setApplyingRoute(false);
             setBusyAction(null);
-        }
-    };
-
-    const runScreenRecovery = async () => {
-        if (!Native || busyAction) return;
-        setBusyAction("screen");
-        setScreenRecoverySeconds(30);
-        setActionMessage("VPN desconectada. O Discord continua aberto e a conexão normal está sendo usada.");
-        autoEnablePaused = true;
-        try {
-            const stopped = await Native.shutdown(false) as { success?: boolean; error?: string; message?: string };
-            if (stopped.success === false) throw new Error(stopped.error || stopped.message || "Não foi possível desconectar a VPN.");
-            stopPresence();
-            updateRouteInfo(null, null, null, null);
-
-            for (let seconds = 30; seconds > 0; seconds--) {
-                setScreenRecoverySeconds(seconds);
-                await new Promise<void>(resolve => setTimeout(resolve, 1_000));
-            }
-
-            const enabled = await Native.enable(false) as { success?: boolean; error?: string; message?: string };
-            if (enabled.success === false) throw new Error(enabled.error || enabled.message || "Não foi possível reconectar a VPN.");
-            await refreshPresenceStatus();
-            setActionMessage("VPN reconectada. Teste a tela novamente.");
-            showToast("VPN reconectada depois da pausa de 30 segundos.", "success");
-        } catch (error) {
-            const message = error instanceof Error ? error.message : String(error);
-            setActionMessage(`Recuperação da tela: ${message}`);
-            showToast(`A VPN não conseguiu reconectar: ${message}`, "failure");
-        } finally {
-            autoEnablePaused = false;
-            setScreenRecoverySeconds(0);
-            setBusyAction(null);
-            await refreshStatus();
         }
     };
 
@@ -1691,16 +1656,16 @@ function QuickMenuSettings() {
                     <strong>{busyAction === "optimize"
                         ? routePauseSeconds > 0 ? `VPN desligada · ${routePauseSeconds}s` : "Otimizando rota..."
                         : "Otimizar rota"}</strong>
-                    <span>Desliga a VPN por 40 segundos, usa a mesma otimização do painel admin e mantém o Discord aberto.</span>
+                    <span>Otimiza a rota da VPN sem reiniciar o Discord.</span>
                 </button>
                 <button
                     type="button"
                     className="lefferzin-quick-action lefferzin-quick-action-screen"
-                    onClick={() => void runScreenRecovery()}
+                    onClick={() => void runOptimize()}
                     disabled={!Native || quickBusy}
                 >
-                    <strong>{screenRecoverySeconds > 0 ? `Aguardando ${screenRecoverySeconds}s...` : "Tela travando?"}</strong>
-                    <span>Se você estiver assistindo com a tela aberta, aperte o botão. Se você estiver fazendo tela, tente também; porém, provavelmente o problema é seu amigo.</span>
+                    <strong>Tela travando?</strong>
+                    <span>Faz a mesma otimização: desliga a VPN por 5 segundos, otimiza a rota e mantém o Discord aberto.</span>
                 </button>
             </div>
 

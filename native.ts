@@ -38,7 +38,7 @@ const MAX_LOG_LINES = 400;
 const MAX_LOG_BYTES = 256 * 1024;
 const CAPTCHA_IPC_CHANNEL = "lefferzin-plugin-proton-captcha-response";
 const CAPTCHA_TIMEOUT_MS = 120_000;
-const QUICK_ROUTE_PAUSE_MS = 40_000;
+const QUICK_ROUTE_PAUSE_MS = 5_000;
 
 const VPN_DATA_DIR = defaultPluginVpnDataDir();
 const GUI_DATA_DIR = dirname(VPN_DATA_DIR);
