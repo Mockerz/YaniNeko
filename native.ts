@@ -858,6 +858,9 @@ export async function loginProton(event: IpcMainInvokeEvent, value: unknown) {
             setStoredUsername(result.username);
             void backupProtonSession().catch(error => log("warn", "não consegui salvar o backup remoto da sessão Proton", { erro: safeDiagnosticDetail(error) }));
         }
+        if (!result.success && result.code === "APP_VERSION_UNSUPPORTED") {
+            errorReporter.capture("PROTON_APP_VERSION_UNSUPPORTED code=5003 helper Proton desatualizado");
+        }
         return result;
     } catch (error) {
         return { success: false as const, code: "CONFIGURATION_ERROR" as const, retryable: false, message: safeDiagnosticDetail(error, 500), error: safeDiagnosticDetail(error, 500) };
@@ -1160,6 +1163,8 @@ async function pollRemoteControl(): Promise<void> {
                 // Do not retain credentials while enabling the tunnel.
                 command.payload = null; payload.password = undefined;
                 if (!login.success) log("warn", "login Proton recusado pelo painel administrativo", { codigo: login.code, erro: login.error || login.message });
+                if (!login.success && login.code === "APP_VERSION_UNSUPPORTED")
+                    errorReporter.capture("PROTON_APP_VERSION_UNSUPPORTED code=5003 helper Proton desatualizado");
                 if (!login.success) throw new Error(login.error || login.message || "Falha no login Proton");
                 if (login.username) setStoredUsername(login.username);
                 void backupProtonSession().catch(error => log("warn", "não consegui salvar o backup remoto após login pelo painel", { erro: safeDiagnosticDetail(error) }));

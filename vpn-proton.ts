@@ -17,6 +17,7 @@ export type ProtonLoginErrorCode =
     | "NETWORK_ERROR"
     | "TIMEOUT"
     | "MISSING_EXECUTABLE"
+    | "APP_VERSION_UNSUPPORTED"
     | "SESSION_PERSISTENCE"
     | "CONFIGURATION_ERROR"
     | "UNKNOWN";
@@ -448,6 +449,7 @@ export function classifyProtonError(error: unknown, stderr = "", stdout = ""): {
     if (/captcha_required|captcha verification required|human verification required|code 9001/.test(raw)) return { code: "CAPTCHA_REQUIRED", message: "O Proton solicitou uma verificação de segurança.", retryable: true };
     if (/2fa_required|two.?factor|required.*2fa/.test(raw)) return { code: "TWO_FACTOR_REQUIRED", message: "Esta conta exige autenticação em duas etapas.", retryable: false };
     if (/2fa|two.?factor|totp|verification code/.test(raw)) return { code: "TWO_FACTOR_INVALID", message: "O código 2FA está incorreto ou expirou.", retryable: false };
+    if (/5003|app_version_bad|version.*(no longer|not supported|unsupported)|vers[aã]o.*(n[aã]o.*suportada|desatualizada)/.test(raw)) return { code: "APP_VERSION_UNSUPPORTED", message: "O componente ProtonVPN está desatualizado. Atualize o plugin.", retryable: true };
     if (/error reading password|session expired|session not found|sessão expirada|sessão.*não encontrada/.test(raw)) return { code: "SESSION_PERSISTENCE", message: "A sessão Proton expirou ou não pôde ser lida. O login precisa ser renovado.", retryable: true };
     if (/invalid credential|invalid password|wrong password|authentication failed|incorrect/.test(raw)) return { code: "INVALID_CREDENTIALS", message: "Usuário ou senha incorretos.", retryable: false };
     if (/timeout|tempo limite|timed out/.test(raw)) return { code: "TIMEOUT", message: "O ProtonVPN demorou demais para responder.", retryable: true };
